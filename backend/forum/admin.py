@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Board, BoardFollow, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
+from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
 
 
 @admin.register(Board)
@@ -12,7 +12,7 @@ class BoardAdmin(admin.ModelAdmin):
 
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
-	list_display = ('title', 'board', 'author', 'is_pinned', 'is_locked', 'created_at')
+	list_display = ('title', 'board', 'author', 'views_count', 'is_pinned', 'is_locked', 'created_at')
 	list_filter = ('board', 'is_pinned', 'is_locked')
 	search_fields = ('title', 'body', 'author__username')
 
@@ -51,3 +51,11 @@ class HomeHeroSlideAdmin(admin.ModelAdmin):
 	list_filter = ('is_active',)
 	search_fields = ('title', 'description', 'link_url')
 	ordering = ('sort_order', 'id')
+
+
+@admin.register(BoardHeroSlide)
+class BoardHeroSlideAdmin(admin.ModelAdmin):
+	list_display = ('id', 'board', 'post', 'sort_order', 'is_active', 'updated_at')
+	list_filter = ('is_active', 'board')
+	search_fields = ('title', 'description', 'post__title', 'board__title')
+	ordering = ('board', 'sort_order', 'id')

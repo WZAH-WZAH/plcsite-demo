@@ -19,10 +19,11 @@ from rest_framework.response import Response
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
 
-from .models import Board, BoardFollow, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
+from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
 from .permissions import IsAuthorOrStaffOrReadOnly
 from .serializers import (
     BoardSerializer,
+    BoardHeroSlideSerializer,
     CommentCreateSerializer,
     CommentSerializer,
     HomeHeroSlideSerializer,
@@ -48,6 +49,19 @@ class BoardViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = BoardSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
+
+    @action(detail=True, methods=['get'], url_path='hero', permission_classes=[permissions.AllowAny])
+    def hero(self, request, slug=None):
+        """Public board hero carousel slides.
+
+        Slides are configured by admins in Django Admin.
+        Only active slides are returned.
+        """
+
+        board = self.get_object()
+        qs = BoardHeroSlide.objects.filter(board=board, is_active=True).select_related('post', 'post__author').order_by('sort_order', 'id')
+        ser = BoardHeroSlideSerializer(qs, many=True, context={'request': request})
+        return Response(ser.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='follow', permission_classes=[permissions.IsAuthenticated])
     def follow(self, request, slug=None):
@@ -102,6 +116,18 @@ class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.select_related('board', 'author', 'reviewed_by').prefetch_related('resource__links')
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsAuthorOrStaffOrReadOnly]
+
+    def retrieve(self, request, *args, **kwargs):
+        obj = self.get_object()
+        try:
+            Post.objects.filter(id=obj.id).update(views_count=F('views_count') + 1)
+            obj.refresh_from_db(fields=['views_count'])
+        except Exception:
+            # Avoid breaking reads if the counter update fails.
+            pass
+
+        serializer = self.get_serializer(obj)
+        return Response(serializer.data)
 
     def get_queryset(self):
         qs = super().get_queryset()

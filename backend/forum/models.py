@@ -41,6 +41,7 @@ class Post(models.Model):
 	reject_reason = models.CharField(max_length=200, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
+	views_count = models.PositiveIntegerField(default=0)
 
 	class Meta:
 		ordering = ['-is_pinned', '-created_at']
@@ -48,6 +49,7 @@ class Post(models.Model):
 			models.Index(fields=['board', '-created_at']),
 			models.Index(fields=['author', '-created_at']),
 			models.Index(fields=['status', '-created_at']),
+			models.Index(fields=['-views_count', 'id']),
 		]
 
 	def __str__(self) -> str:
@@ -171,3 +173,32 @@ class HomeHeroSlide(models.Model):
 
 	def __str__(self) -> str:
 		return f"hero:{self.id} {self.title or self.link_url}"
+
+
+class BoardHeroSlide(models.Model):
+	"""Admin-configured hero carousel slides for a specific board.
+
+	Notes:
+	- This is an operability slot like homepage hero.
+	- We point to a Post so the carousel can open a post detail.
+	- title/description/image are optional overrides; if empty, UI can fall back to post fields.
+	"""
+
+	board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name='hero_slides')
+	post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='board_hero_slides')
+	title = models.CharField(max_length=120, blank=True)
+	description = models.CharField(max_length=200, blank=True)
+	image = models.ImageField(upload_to='board_hero/', null=True, blank=True)
+	sort_order = models.PositiveIntegerField(default=0)
+	is_active = models.BooleanField(default=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ['sort_order', 'id']
+		indexes = [
+			models.Index(fields=['board', 'is_active', 'sort_order', 'id']),
+		]
+
+	def __str__(self) -> str:
+		return f"board:{self.board_id} hero:{self.id} post:{self.post_id}"

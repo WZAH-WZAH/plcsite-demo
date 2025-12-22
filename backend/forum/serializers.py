@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Board, Comment, HomeHeroSlide, Post
+from .models import Board, BoardHeroSlide, Comment, HomeHeroSlide, Post
 from .image_utils import validate_and_process_uploaded_image
 from .sanitize import sanitize_user_html_in_markdown
 
@@ -44,6 +44,7 @@ class PostSerializer(serializers.ModelSerializer):
     is_liked = serializers.BooleanField(read_only=True, required=False, default=False)
     is_favorited = serializers.BooleanField(read_only=True, required=False, default=False)
     is_following_author = serializers.BooleanField(read_only=True, required=False, default=False)
+    views_count = serializers.IntegerField(read_only=True, required=False, default=0)
     remove_cover_image = serializers.BooleanField(write_only=True, required=False)
     resource = PostResourceSerializer(read_only=True)
     resource_links = PostResourceLinkInputSerializer(many=True, write_only=True, required=False)
@@ -61,6 +62,7 @@ class PostSerializer(serializers.ModelSerializer):
 			'cover_image_url',
             'remove_cover_image',
             'body',
+            'views_count',
 			'likes_count',
 			'favorites_count',
 			'is_liked',
@@ -199,6 +201,43 @@ class HomeHeroSlideSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         try:
             f = getattr(obj, 'image', None)
+            return f.url if f else ''
+        except Exception:
+            return ''
+
+
+class BoardHeroSlideSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField(read_only=True)
+    post_id = serializers.IntegerField(source='post.id', read_only=True)
+    post_title = serializers.CharField(source='post.title', read_only=True)
+    post_author_username = serializers.CharField(source='post.author.username', read_only=True)
+    post_cover_image_url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = BoardHeroSlide
+        fields = (
+            'id',
+            'sort_order',
+            'is_active',
+            'title',
+            'description',
+            'image_url',
+            'post_id',
+            'post_title',
+            'post_author_username',
+            'post_cover_image_url',
+        )
+
+    def get_image_url(self, obj):
+        try:
+            f = getattr(obj, 'image', None)
+            return f.url if f else ''
+        except Exception:
+            return ''
+
+    def get_post_cover_image_url(self, obj):
+        try:
+            f = getattr(obj.post, 'cover_image', None)
             return f.url if f else ''
         except Exception:
             return ''

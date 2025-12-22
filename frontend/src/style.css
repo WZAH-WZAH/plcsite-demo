@@ -483,6 +483,73 @@ a {
   gap: 12px;
 }
 
+/* Board page: below-the-hero grid (5 per row on desktop) */
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* Latest timeline (X-like): single column, excerpt only */
+.timeline {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.timeline-item:last-child {
+  border-bottom: none;
+}
+
+.timeline-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.timeline-title {
+  font-weight: 800;
+  margin-top: 6px;
+  line-height: 1.25;
+}
+
+.timeline-excerpt {
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
+.timeline-cta {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timeline-media {
+  width: 120px;
+  flex: 0 0 auto;
+}
+
+.timeline-media img {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  display: block;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
 .home-more {
   color: inherit;
   font-size: 14px;
@@ -551,10 +618,31 @@ textarea {
   .home-row-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+
+  .board-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .timeline-media {
+    width: 96px;
+  }
+
+  .timeline-media img {
+    width: 96px;
+    height: 72px;
+  }
 }
 
 @media (max-width: 560px) {
   .home-row-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .board-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timeline-item {
+    grid-template-columns: 1fr;
   }
 }
