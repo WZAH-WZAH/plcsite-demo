@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { auth } from '../auth'
+import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,6 +75,21 @@ function statusText(s) {
   if (s === 'pending') return '待审核'
   if (s === 'rejected') return '已拒绝'
   return s || ''
+}
+
+function fmtTime(s) {
+  try {
+    return new Date(s).toLocaleString()
+  } catch {
+    return ''
+  }
+}
+
+function resultMeta(p) {
+  const created = p?.created_at ? `创建：${fmtTime(p.created_at)}` : ''
+  const updated = p?.updated_at ? `最后编辑：${fmtTime(p.updated_at)}` : ''
+  const st = auth.state.me ? statusText(p?.status) : ''
+  return [created, updated, st].filter(Boolean).join(' · ')
 }
 
 async function load() {
@@ -162,20 +178,13 @@ watch(() => route.query.q, load)
         </div>
       </div>
 
-      <RouterLink v-for="p in posts" :key="p.id" class="card" :to="`/posts/${p.id}`">
-        <div class="row" style="justify-content: space-between">
-          <div>
-            <div style="font-weight: 700" v-html="getTitleHtml(p)"></div>
-            <div class="muted">
-              by {{ p.author_username }} · 创建：{{ new Date(p.created_at).toLocaleString() }}
-              <span v-if="p.updated_at"> · 最后编辑：{{ new Date(p.updated_at).toLocaleString() }}</span>
-            </div>
-          </div>
-          <div class="muted" v-if="auth.state.me">
-            {{ statusText(p.status) }}
-          </div>
-        </div>
-      </RouterLink>
+      <PostPreviewCard
+        v-for="p in posts"
+        :key="p.id"
+        :post="p"
+        :titleHtml="getTitleHtml(p)"
+        :meta="resultMeta(p)"
+      />
 
       <div v-if="q && posts.length === 0" class="muted">没有匹配结果</div>
       <div v-if="!q" class="muted">在顶部输入关键词开始搜索</div>

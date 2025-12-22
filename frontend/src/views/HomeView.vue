@@ -2,6 +2,7 @@
   // Home page ("/")
   import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
   import { apiGet, unwrapList } from '../api'
+  import PostPreviewCard from '../components/PostPreviewCard.vue'
   
   const loading = ref(false)
   const error = ref('')
@@ -81,28 +82,37 @@
       heroCarouselRaw.value = []
     }
   
-    // 2. 获取右侧推荐 (尝试 Hot -> Latest，确保填满6个)
+    // 2. 获取右侧推荐
     try {
       const { data } = await apiGet('/api/posts/feed/hot/', { __skipAuth: true, params: { days: 7 } }, 5000)
-      const list = unwrapList(data)
-      // 备注：轮播是运营位 slide（不一定对应帖子），因此不能用 slide.id 去“去重帖子 id”。
-      // 这里保持推荐流的确定性：先取热门，不够再用最新补齐，并在 hot/latest 之间去重。
-      heroRightRaw.value = list.slice(0, HERO_RIGHT_COUNT)
-      
-      // 如果热门不够6个，用最新补齐
-      if (heroRightRaw.value.length < HERO_RIGHT_COUNT) {
-        const { data: latestData } = await apiGet('/api/posts/feed/latest/', { __skipAuth: true }, 5000)
-        const latestList = unwrapList(latestData)
-        
-        const existingIds = new Set(heroRightRaw.value.map(p => p.id))
-        for (const p of latestList) {
-          if (heroRightRaw.value.length >= HERO_RIGHT_COUNT) break
-          if (!existingIds.has(p.id)) {
-            heroRightRaw.value.push(p)
-            existingIds.add(p.id)
+        const hotList = unwrapList(data)
+
+        // 注意：主页轮播是“运营位”（可能是外链/不绑定帖子），不能拿轮播的 id 去和帖子 id 做去重。
+        // 这里采用：热门优先 + 最新补齐，并只在 hot/latest 两个源之间按 post.id 去重。
+        const picked = []
+        const pickedIds = new Set()
+
+        for (const p of hotList) {
+          if (picked.length >= HERO_RIGHT_COUNT) break
+          if (p?.id == null) continue
+          if (pickedIds.has(p.id)) continue
+          picked.push(p)
+          pickedIds.add(p.id)
+        }
+
+        if (picked.length < HERO_RIGHT_COUNT) {
+          const { data: latestData } = await apiGet('/api/posts/feed/latest/', { __skipAuth: true }, 5000)
+          const latestList = unwrapList(latestData)
+          for (const p of latestList) {
+            if (picked.length >= HERO_RIGHT_COUNT) break
+            if (p?.id == null) continue
+            if (pickedIds.has(p.id)) continue
+            picked.push(p)
+            pickedIds.add(p.id)
           }
         }
-      }
+
+        heroRightRaw.value = picked
     } catch {
       heroRightRaw.value = []
     }
@@ -112,7 +122,7 @@
     const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 5000)
     boards.value = unwrapList(data)
   
-    // 获取每个板块的前 6 个帖子（保持原样）
+    // 获取每个板块的前 6 个帖子
     const rows = await mapLimit(boards.value, 4, async (b) => {
       try {
         const { data: postsData } = await apiGet('/api/posts/', { __skipAuth: true, params: { board: b.id } }, 5000)
@@ -201,28 +211,7 @@
         </div>
   
         <div class="bili-grid">
-          <RouterLink 
-            v-for="p in heroRightPosts" 
-            :key="p.id" 
-            :to="`/posts/${p.id}`"
-            class="bili-card"
-          >
-            <div class="bili-card-cover">
-              <img v-if="p.cover_image_url" :src="p.cover_image_url" loading="lazy" />
-              <div class="bili-stats">
-                <span class="stat-item">
-                  <svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor"><path d="M3 3l6 3-6 3V3z"/></svg>
-                  {{ p.views_count || 0 }}
-                </span>
-              </div>
-            </div>
-            <div class="bili-card-info">
-               <div class="bili-title" :title="p.title">{{ p.title }}</div>
-               <div class="bili-author">
-                 <span class="up-icon">UP</span>{{ p.author_username }}
-               </div>
-            </div>
-          </RouterLink>
+          <PostPreviewCard v-for="p in heroRightPosts" :key="p.id" :post="p" />
         </div>
       </div>
   
@@ -237,11 +226,7 @@
   
         <div v-if="row.posts?.length" style="margin-top: 10px">
           <div class="home-row-grid">
-            <RouterLink v-for="p in row.posts" :key="p.id" class="card" style="padding: 10px; display: grid; gap: 8px" :to="`/posts/${p.id}`">
-              <img v-if="p.cover_image_url" :src="p.cover_image_url" alt="cover" style="width: 100%; height: 92px; object-fit: cover; border-radius: 10px" />
-              <div style="font-weight: 700">{{ p.title }}</div>
-              <div class="muted" style="font-size: 12px">by {{ p.author_username }}</div>
-            </RouterLink>
+            <PostPreviewCard v-for="p in row.posts" :key="p.id" :post="p" />
           </div>
         </div>
         <div v-else class="muted" style="margin-top: 10px">该板块暂无可展示内容。</div>
@@ -251,7 +236,7 @@
   </template>
   
   <style scoped>
-  /* --- Bilibili 风格 Hero 样式 --- */
+  /* --- Bilibili 风格样式 --- */
   
   .bili-recommend-box {
     display: flex;
@@ -314,7 +299,6 @@
     right: 16px;
     display: flex;
     gap: 6px;
-    /* 确保整个容器都能阻断点击冒泡，虽然 span 已有 .stop，但保险起见 */
     pointer-events: auto; 
   }
   .dot {
@@ -436,11 +420,10 @@
     font-size: 10px;
     line-height: 12px;
     transform: scale(0.9);
+    margin-right: 2px; /* 微调间距 */
   }
   
-  /* 移动端适配优化
-    优化点 3: 使用 inset: 0 替代 top/left
-  */
+  /* 移动端适配 */
   @media (max-width: 900px) {
     .bili-recommend-box {
       flex-direction: column;
@@ -449,10 +432,9 @@
     .bili-carousel-wrap {
       width: 100%;
       height: 0;
-      padding-bottom: 56.25%; /* 16:9 比例 */
+      padding-bottom: 56.25%; /* 16:9 */
     }
     .bili-carousel {
-      /* 核心修改：使用 inset: 0 确保填满容器 */
       position: absolute; 
       inset: 0;
     }

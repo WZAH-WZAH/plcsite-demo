@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiGet, unwrapList } from '../api'
 import { auth } from '../auth'
+import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
 
@@ -215,21 +216,13 @@ onUnmounted(() => {
         <div v-else class="card muted" style="display: flex; align-items: center; justify-content: center">暂无帖子</div>
 
         <div class="home-hero-grid">
-          <RouterLink v-for="p in rightTopPosts" :key="p.id" class="home-hero-tile" :to="`/posts/${p.id}`">
-            <img v-if="p.cover_image_url" :src="p.cover_image_url" alt="cover" />
-            <div class="home-hero-tile-title">{{ p.title }}</div>
-            <div class="muted" style="font-size: 12px">{{ fmtDate(p.created_at) }} · 浏览 {{ p.views_count || 0 }}</div>
-          </RouterLink>
+          <PostPreviewCard v-for="p in rightTopPosts" :key="p.id" :post="p" :meta="fmtDate(p.created_at)" />
         </div>
       </div>
 
       <!-- Grid: 5 per row -->
       <div class="board-grid" v-if="gridPosts.length > 0">
-        <RouterLink v-for="p in gridPosts" :key="p.id" class="home-hero-tile" :to="`/posts/${p.id}`">
-          <img v-if="p.cover_image_url" :src="p.cover_image_url" alt="cover" />
-          <div class="home-hero-tile-title">{{ p.title }}</div>
-          <div class="muted" style="font-size: 12px">{{ fmtDate(p.created_at) }} · 浏览 {{ p.views_count || 0 }}</div>
-        </RouterLink>
+        <PostPreviewCard v-for="p in gridPosts" :key="p.id" :post="p" :meta="fmtDate(p.created_at)" />
       </div>
 
       <div v-if="posts.length === 0" class="muted">暂无帖子</div>
