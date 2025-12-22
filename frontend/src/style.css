@@ -64,6 +64,9 @@ a {
 .topbar-primary {
   display: flex;
   gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 
 .avatar-btn {
   width: 34px;
@@ -89,9 +92,6 @@ a {
 .avatar-fallback {
   font-weight: 800;
   font-size: 14px;
-}
-  align-items: center;
-  flex-wrap: wrap;
 }
 
 .topbar-primary-link {
@@ -131,6 +131,9 @@ a {
 }
 
 .subnav-link.router-link-active {
+  font-weight: 700;
+  border-bottom-color: #111827;
+}
 
 /* Modal (minimal) */
 .modal-backdrop {
@@ -169,9 +172,6 @@ a {
 
 .avatar-preview-fallback {
   font-weight: 800;
-}
-  font-weight: 700;
-  border-bottom-color: #111827;
 }
 
 
