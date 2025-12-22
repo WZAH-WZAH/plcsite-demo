@@ -1,0 +1,24 @@
+# Meilisearch (open-source) for enhanced search: autocomplete/highlight/facets/typo-tolerance
+# Usage (Windows PowerShell):
+#   docker compose -f docker-compose.meilisearch.yml up -d
+# Then set backend/.env:
+#   MEILI_URL=http://127.0.0.1:7700
+#   MEILI_API_KEY=
+#   MEILI_INDEX_POSTS=posts
+# And run:
+#   python manage.py reindex_posts
+
+services:
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    environment:
+      - MEILI_ENV=development
+      - MEILI_NO_ANALYTICS=true
+      # - MEILI_MASTER_KEY=change-me
+    ports:
+      - "7700:7700"
+    volumes:
+      - meili_data:/meili_data
+
+volumes:
+  meili_data:
