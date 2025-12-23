@@ -1,14 +1,16 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api, apiGet, unwrapList } from '../api'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { sanitizeHtml } from '../sanitize'
 import { validateSingleImageFile } from '../imageUpload'
 import { formatApiError } from '../errorFormat'
+import { auth } from '../auth'
 
 const router = useRouter()
+const route = useRoute()
 
 const boards = ref([])
 const boardId = ref('')
@@ -150,7 +152,24 @@ function ensureBodyImageLimit(nextText) {
 
 async function loadBoards() {
   const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 8000)
-  boards.value = unwrapList(data)
+  const all = unwrapList(data)
+
+  // Common-sense forum rule:
+  // - 公告板块用于发布通知，普通用户不应在此发帖。
+  const canPostAnnouncements = Boolean(auth.state.me?.is_staff)
+  boards.value = canPostAnnouncements ? all : all.filter((b) => b?.slug !== 'announcements')
+
+  const q = (route.query.board || '').toString().trim()
+  if (q) {
+    const byId = boards.value.find((b) => String(b?.id) === q)
+    const bySlug = boards.value.find((b) => String(b?.slug) === q)
+    const picked = byId || bySlug
+    if (picked?.id != null) {
+      boardId.value = String(picked.id)
+      return
+    }
+  }
+
   if (!boardId.value && boards.value.length) boardId.value = String(boards.value[0].id)
 }
 

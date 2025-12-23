@@ -17,6 +17,8 @@
   // 板块推荐流数据
   const boards = ref([])
   const boardRows = ref([]) 
+
+  const homeExcludedBoardSlugs = new Set(['announcements', 'feedback', 'site-log', 'blackroom'])
   
   // --- 计算属性 ---
   const heroCarouselPosts = computed(() => (heroCarouselRaw.value || []).slice(0, HERO_CAROUSEL_COUNT))
@@ -95,6 +97,7 @@
         for (const p of hotList) {
           if (picked.length >= HERO_RIGHT_COUNT) break
           if (p?.id == null) continue
+          if (homeExcludedBoardSlugs.has(p?.board_slug)) continue
           if (pickedIds.has(p.id)) continue
           picked.push(p)
           pickedIds.add(p.id)
@@ -106,6 +109,7 @@
           for (const p of latestList) {
             if (picked.length >= HERO_RIGHT_COUNT) break
             if (p?.id == null) continue
+            if (homeExcludedBoardSlugs.has(p?.board_slug)) continue
             if (pickedIds.has(p.id)) continue
             picked.push(p)
             pickedIds.add(p.id)
@@ -120,7 +124,7 @@
   
   async function loadBoardsAndRows() {
     const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 5000)
-    boards.value = unwrapList(data)
+    boards.value = unwrapList(data).filter((b) => !homeExcludedBoardSlugs.has(b?.slug))
   
     // 获取每个板块的前 6 个帖子
     const rows = await mapLimit(boards.value, 4, async (b) => {

@@ -8,6 +8,7 @@ import AdminUsersView from '../views/AdminUsersView.vue'
 import BoardPostsView from '../views/BoardPostsView.vue'
 import BoardsView from '../views/BoardsView.vue'
 import HomeView from '../views/HomeView.vue'
+import HotView from '../views/HotView.vue'
 import LatestView from '../views/LatestView.vue'
 import LoginView from '../views/LoginView.vue'
 import MeView from '../views/MeView.vue'
@@ -23,6 +24,9 @@ const router = createRouter({
   routes: [
     // Home page: recommendation + board rows
     { path: '/', name: 'home', component: HomeView },
+
+    // Hot rankings
+    { path: '/hot', name: 'hot', component: HotView },
 
     // Latest updates feed
     { path: '/latest', name: 'latest', component: LatestView },

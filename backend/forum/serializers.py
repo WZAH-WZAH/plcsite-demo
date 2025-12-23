@@ -41,10 +41,13 @@ class PostSerializer(serializers.ModelSerializer):
     # - Fallback defaults keep serializer robust if annotations are missing.
     likes_count = serializers.IntegerField(read_only=True, required=False, default=0)
     favorites_count = serializers.IntegerField(read_only=True, required=False, default=0)
+    comments_count = serializers.IntegerField(read_only=True, required=False, default=0)
     is_liked = serializers.BooleanField(read_only=True, required=False, default=False)
     is_favorited = serializers.BooleanField(read_only=True, required=False, default=False)
     is_following_author = serializers.BooleanField(read_only=True, required=False, default=False)
     views_count = serializers.IntegerField(read_only=True, required=False, default=0)
+    # Ranking / hot-score (0..100). Filled by ranking endpoints; defaults to 0 elsewhere.
+    hot_score_100 = serializers.IntegerField(read_only=True, required=False, default=0)
     remove_cover_image = serializers.BooleanField(write_only=True, required=False)
     resource = PostResourceSerializer(read_only=True)
     resource_links = PostResourceLinkInputSerializer(many=True, write_only=True, required=False)
@@ -63,8 +66,10 @@ class PostSerializer(serializers.ModelSerializer):
             'remove_cover_image',
             'body',
             'views_count',
+			'hot_score_100',
 			'likes_count',
 			'favorites_count',
+            'comments_count',
 			'is_liked',
 			'is_favorited',
 			'is_following_author',
@@ -79,7 +84,29 @@ class PostSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         )
-        read_only_fields = ('author',)
+        read_only_fields = (
+            'author',
+            'status',
+            'is_pinned',
+            'is_locked',
+            'reviewed_by',
+            'reviewed_at',
+            'reject_reason',
+            'created_at',
+            'updated_at',
+            'views_count',
+            'author_username',
+            'board_slug',
+            'cover_image_url',
+            'hot_score_100',
+            'likes_count',
+            'favorites_count',
+            'comments_count',
+            'is_liked',
+            'is_favorited',
+            'is_following_author',
+            'resource',
+        )
 
     def get_cover_image_url(self, obj):
         try:

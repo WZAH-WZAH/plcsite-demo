@@ -9,12 +9,16 @@ from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, F, IntegerField, OuterRef, Q, Value
+from django.db.models import BooleanField, Count, DateTimeField, Exists, ExpressionWrapper, F, IntegerField, Max, OuterRef, Q, Value
+from django.db.models.functions import Cast
 from django.utils import timezone
+from django.utils.decorators import method_decorator
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
+
+from django_ratelimit.decorators import ratelimit
 
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
@@ -117,11 +121,22 @@ class PostViewSet(viewsets.ModelViewSet):
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsAuthorOrStaffOrReadOnly]
 
+    @method_decorator(ratelimit(key='user_or_ip', rate='5/m', method='POST', block=False))
+    def create(self, request, *args, **kwargs):
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many requests.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        return super().create(request, *args, **kwargs)
+
     def retrieve(self, request, *args, **kwargs):
         obj = self.get_object()
         try:
             Post.objects.filter(id=obj.id).update(views_count=F('views_count') + 1)
-            obj.refresh_from_db(fields=['views_count'])
+            # Avoid refresh_from_db here so we don't accidentally drop queryset annotations
+            # (likes_count/favorites_count/comments_count flags) from the object.
+            try:
+                obj.views_count = int(getattr(obj, 'views_count', 0)) + 1
+            except Exception:
+                pass
         except Exception:
             # Avoid breaking reads if the counter update fails.
             pass
@@ -156,6 +171,7 @@ class PostViewSet(viewsets.ModelViewSet):
         filtered = filtered.annotate(
             likes_count=Count('likes', distinct=True),
             favorites_count=Count('favorites', distinct=True),
+            comments_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
         )
         if user and user.is_authenticated:
             filtered = filtered.annotate(
@@ -170,12 +186,75 @@ class PostViewSet(viewsets.ModelViewSet):
                 is_following_author=Value(False, output_field=BooleanField()),
             )
 
+        # Sorting
+        # Supported:
+        # - sort=created|updated|commented|hot
+        # - range=week|month (for hot)
+        # - end=ISO date/datetime (for hot history)
+        sort = (self.request.query_params.get('sort') or 'created').strip().lower()
+        if sort in ('created_at', 'created'):
+            filtered = filtered.order_by('-is_pinned', '-created_at')
+        elif sort in ('updated_at', 'updated'):
+            filtered = filtered.order_by('-is_pinned', '-updated_at', '-created_at')
+        elif sort in ('last_comment', 'commented', 'comment'):
+            filtered = filtered.annotate(
+                last_comment_at=Max(
+                    'comments__created_at',
+                    filter=Q(comments__is_deleted=False),
+                    output_field=DateTimeField(),
+                )
+            ).order_by('-is_pinned', F('last_comment_at').desc(nulls_last=True), '-created_at')
+        elif sort in ('hot', 'heat', 'trending'):
+            range_value = (self.request.query_params.get('range') or 'week').strip().lower()
+            window_days = 7 if range_value == 'week' else 30
+            end_raw = (self.request.query_params.get('end') or '').strip()
+            end_dt = None
+            if end_raw:
+                try:
+                    end_dt = timezone.datetime.fromisoformat(end_raw)
+                    if timezone.is_naive(end_dt):
+                        end_dt = timezone.make_aware(end_dt, timezone.get_current_timezone())
+                except Exception:
+                    end_dt = None
+            end_dt = end_dt or timezone.now()
+            since = end_dt - timedelta(days=window_days)
+            filtered = filtered.annotate(
+                hot_likes=Count('likes', filter=Q(likes__created_at__gte=since), distinct=True),
+                hot_favorites=Count('favorites', filter=Q(favorites__created_at__gte=since), distinct=True),
+                hot_comments=Count(
+                    'comments',
+                    filter=Q(comments__created_at__gte=since, comments__is_deleted=False),
+                    distinct=True,
+                ),
+            )
+
+            # views_count is cumulative; scale it down so it complements recent interactions.
+            # 1 point per 100 views.
+            filtered = filtered.annotate(hot_views=Cast(F('views_count') / Value(100), IntegerField()))
+            score = ExpressionWrapper(
+                (1 * F('hot_views')) + (2 * F('hot_likes')) + (3 * F('hot_favorites')) + (2 * F('hot_comments')),
+                output_field=IntegerField(),
+            )
+            filtered = filtered.annotate(hot_score=score).order_by('-is_pinned', '-hot_score', '-created_at')
+        else:
+            filtered = filtered.order_by('-is_pinned', '-created_at')
+
         return filtered
 
     def perform_create(self, serializer):
         user = self.request.user
+
+        board = serializer.validated_data.get('board')
+        if board is not None and getattr(board, 'slug', '') == 'announcements' and not user.is_staff:
+            raise PermissionDenied('Only staff can post in announcements.')
+
         status_value = Post.Status.PUBLISHED if user.is_staff else Post.Status.PENDING
-        post = serializer.save(author=user, status=status_value)
+        extra = {}
+        if not user.is_staff:
+            # Defense-in-depth: even if client sends these fields, force them off.
+            extra.update({'is_pinned': False, 'is_locked': False})
+
+        post = serializer.save(author=user, status=status_value, **extra)
 
         self._create_revision(post=post, editor=user)
         write_audit_log(actor=user, action='post.create', target_type='post', target_id=str(post.id), request=self.request)
@@ -392,6 +471,8 @@ class PostViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('User is banned.')
 
         post = self.get_object()
+        if post.status != Post.Status.PUBLISHED and not getattr(user, 'is_staff', False) and post.author_id != user.id:
+            raise PermissionDenied('Not allowed to like this post.')
         existing = PostLike.objects.filter(post=post, user=user).first()
         if existing is not None:
             existing.delete()
@@ -422,6 +503,8 @@ class PostViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('User is banned.')
 
         post = self.get_object()
+        if post.status != Post.Status.PUBLISHED and not getattr(user, 'is_staff', False) and post.author_id != user.id:
+            raise PermissionDenied('Not allowed to favorite this post.')
         existing = PostFavorite.objects.filter(post=post, user=user).first()
         if existing is not None:
             existing.delete()
@@ -488,8 +571,10 @@ class PostViewSet(viewsets.ModelViewSet):
             )
         )
 
+        qs = qs.annotate(hot_views=Cast(F('views_count') / Value(100), IntegerField()))
+
         score = ExpressionWrapper(
-            (2 * F('hot_likes')) + (3 * F('hot_favorites')) + (1 * F('hot_comments')),
+            (1 * F('hot_views')) + (2 * F('hot_likes')) + (3 * F('hot_favorites')) + (2 * F('hot_comments')),
             output_field=IntegerField(),
         )
         qs = qs.annotate(hot_score=score).order_by('-hot_score', '-created_at')
@@ -536,11 +621,41 @@ class PostViewSet(viewsets.ModelViewSet):
 
         range_value = (request.query_params.get('range') or 'week').strip().lower()
         window_days = 7 if range_value == 'week' else 30
-        since = timezone.now() - timedelta(days=window_days)
+
+        end_raw = (request.query_params.get('end') or '').strip()
+        end_dt = None
+        if end_raw:
+            try:
+                end_dt = timezone.datetime.fromisoformat(end_raw)
+                if timezone.is_naive(end_dt):
+                    end_dt = timezone.make_aware(end_dt, timezone.get_current_timezone())
+            except Exception:
+                end_dt = None
+        end_dt = end_dt or timezone.now()
+        since = end_dt - timedelta(days=window_days)
+
+        board_slug = (request.query_params.get('board_slug') or '').strip()
+
+        limit = request.query_params.get('limit')
+        offset = request.query_params.get('offset')
+        try:
+            limit_i = int(limit) if limit is not None else None
+        except ValueError:
+            limit_i = None
+        try:
+            offset_i = int(offset) if offset is not None else 0
+        except ValueError:
+            offset_i = 0
+        if limit_i is not None:
+            limit_i = max(1, min(limit_i, 50))
+        offset_i = max(0, offset_i)
+
+        qs = self.get_queryset().filter(status=Post.Status.PUBLISHED)
+        if board_slug:
+            qs = qs.filter(board__slug=board_slug)
 
         qs = (
-            self.get_queryset()
-            .filter(status=Post.Status.PUBLISHED)
+            qs
             .annotate(
                 hot_likes=Count('likes', filter=Q(likes__created_at__gte=since), distinct=True),
                 hot_favorites=Count('favorites', filter=Q(favorites__created_at__gte=since), distinct=True),
@@ -552,16 +667,56 @@ class PostViewSet(viewsets.ModelViewSet):
             )
         )
 
+        qs = qs.annotate(hot_views=Cast(F('views_count') / Value(100), IntegerField()))
+
         score = ExpressionWrapper(
-            (2 * F('hot_likes')) + (3 * F('hot_favorites')) + (1 * F('hot_comments')),
+            (1 * F('hot_views')) + (2 * F('hot_likes')) + (3 * F('hot_favorites')) + (2 * F('hot_comments')),
             output_field=IntegerField(),
         )
         qs = qs.annotate(hot_score=score).order_by('-hot_score', '-created_at')
 
+        def attach_hot_score_100(objs):
+            raw_scores = []
+            for o in objs:
+                try:
+                    raw_scores.append(int(getattr(o, 'hot_score', 0) or 0))
+                except Exception:
+                    raw_scores.append(0)
+            max_raw = max(raw_scores) if raw_scores else 0
+            if max_raw < 0:
+                max_raw = 0
+
+            for o in objs:
+                try:
+                    raw = int(getattr(o, 'hot_score', 0) or 0)
+                except Exception:
+                    raw = 0
+                if raw < 0:
+                    raw = 0
+                if max_raw > 0:
+                    v = int(round(100.0 * float(raw) / float(max_raw)))
+                else:
+                    v = 0
+                if v < 0:
+                    v = 0
+                if v > 100:
+                    v = 100
+                setattr(o, 'hot_score_100', v)
+            return objs
+
+        # Support lightweight Top-N use cases (homepage / hot page).
+        if limit_i is not None:
+            items = list(qs[offset_i : offset_i + limit_i])
+            attach_hot_score_100(items)
+            return Response(self.get_serializer(items, many=True).data)
+
         page = self.paginate_queryset(qs)
         if page is not None:
+            attach_hot_score_100(page)
             return self.get_paginated_response(self.get_serializer(page, many=True).data)
-        return Response(self.get_serializer(qs, many=True).data)
+        items = list(qs)
+        attach_hot_score_100(items)
+        return Response(self.get_serializer(items, many=True).data)
 
     @action(
         detail=True,
@@ -569,6 +724,7 @@ class PostViewSet(viewsets.ModelViewSet):
         url_path='comments',
         permission_classes=[permissions.IsAuthenticatedOrReadOnly],
     )
+    @method_decorator(ratelimit(key='user_or_ip', rate='20/m', method='POST', block=False))
     def comments(self, request, pk=None):
         post = self.get_object()  # respects get_queryset visibility rules
 
@@ -584,6 +740,9 @@ class PostViewSet(viewsets.ModelViewSet):
             return Response(CommentSerializer(qs, many=True).data)
 
         # POST
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many requests.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         user = request.user
         if getattr(user, 'is_currently_banned', False):
             raise PermissionDenied('User is banned.')

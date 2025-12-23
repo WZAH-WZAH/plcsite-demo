@@ -21,11 +21,21 @@ let suggestTimer = null
 // Notes:
 // - “首页 / 最近更新”是导航入口，不属于可发帖板块。
 // - 板块按 slug 映射，实际数据由后端迁移确保存在。
-const canonicalBoardSlugs = ['games', 'mmd', 'irl', 'tech', 'daily', 'announcements']
+// - “公告/站务”放在二级导航右侧。
+const canonicalBoardSlugs = ['games', 'mmd', 'irl', 'tech', 'daily']
 const canonicalBoards = computed(() => {
   const bySlug = new Map((boards.value || []).map((b) => [b.slug, b]))
   return canonicalBoardSlugs.map((slug) => bySlug.get(slug)).filter(Boolean)
 })
+
+const bySlug = computed(() => new Map((boards.value || []).map((b) => [b.slug, b])))
+
+const announcementsBoard = computed(() => bySlug.value.get('announcements') || { slug: 'announcements', title: '公告' })
+const feedbackBoard = computed(() => bySlug.value.get('feedback') || { slug: 'feedback', title: '建议/反馈' })
+const siteLogBoard = computed(() => bySlug.value.get('site-log') || { slug: 'site-log', title: '站务日志' })
+const blackRoomBoard = computed(() => bySlug.value.get('blackroom') || { slug: 'blackroom', title: '小黑屋' })
+
+
 
 // Avatar modal state
 const avatarOpen = ref(false)
@@ -309,13 +319,13 @@ watch(
 
       <div class="topbar-right">
         <template v-if="auth.state.me">
-          <RouterLink to="/notifications" class="btn">
-            通知<span v-if="unread > 0">（{{ unread }}）</span>
-          </RouterLink>
           <button type="button" class="avatar-btn" @click="openAvatarModal()" aria-label="个人中心">
             <img v-if="meAvatarUrl" class="avatar-img" :src="meAvatarUrl" alt="avatar" />
             <span v-else class="avatar-fallback">{{ meInitial }}</span>
           </button>
+          <RouterLink to="/notifications" class="btn">
+            通知<span v-if="unread > 0">（{{ unread }}）</span>
+          </RouterLink>
           <RouterLink to="/posts/new" class="btn btn-solid">发帖</RouterLink>
           <RouterLink v-if="auth.state.me?.is_staff" to="/admin" class="btn">管理</RouterLink>
         </template>
@@ -333,12 +343,36 @@ watch(
             <span class="muted" style="font-size: 12px">加载板块…</span>
           </template>
           <template v-else>
-            <RouterLink class="subnav-link subnav-main" to="/">首页</RouterLink>
-            <RouterLink class="subnav-link subnav-main" to="/latest">最近更新</RouterLink>
+            <div class="subnav-left">
+              <RouterLink class="subnav-link subnav-main" to="/">首页</RouterLink>
+              <RouterLink class="subnav-link subnav-main" to="/hot">热门</RouterLink>
+              <RouterLink class="subnav-link subnav-main" to="/latest">最近更新</RouterLink>
 
-            <RouterLink v-for="b in canonicalBoards" :key="b.id || b.slug" class="subnav-link" :to="`/b/${b.slug}`">
-              {{ b.title || b.name }}
-            </RouterLink>
+              <RouterLink v-for="b in canonicalBoards" :key="b.id || b.slug" class="subnav-link" :to="`/b/${b.slug}`">
+                {{ b.title || b.name }}
+              </RouterLink>
+            </div>
+
+            <div class="subnav-right">
+              <RouterLink class="subnav-link subnav-strong" :to="`/b/${announcementsBoard.slug}`">
+                {{ announcementsBoard.title || announcementsBoard.name }}
+              </RouterLink>
+
+              <div class="subnav-menu">
+                <span class="subnav-link subnav-strong subnav-menu-trigger" tabindex="0">站务</span>
+                <div class="subnav-menu-panel card" role="menu" aria-label="站务">
+                  <RouterLink class="btn" style="width: 100%; text-align: left" :to="`/b/${feedbackBoard.slug}`" role="menuitem">
+                    {{ feedbackBoard.title || feedbackBoard.name }}
+                  </RouterLink>
+                  <RouterLink class="btn" style="width: 100%; text-align: left" :to="`/b/${siteLogBoard.slug}`" role="menuitem">
+                    {{ siteLogBoard.title || siteLogBoard.name }}
+                  </RouterLink>
+                  <RouterLink class="btn" style="width: 100%; text-align: left" :to="`/b/${blackRoomBoard.slug}`" role="menuitem">
+                    {{ blackRoomBoard.title || blackRoomBoard.name }}
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
           </template>
         </nav>
       </div>

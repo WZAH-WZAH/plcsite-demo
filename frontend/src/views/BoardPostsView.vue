@@ -1,11 +1,12 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { apiGet, unwrapList } from '../api'
 import { auth } from '../auth'
 import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const boards = ref([])
 const posts = ref([])
@@ -14,6 +15,24 @@ const loading = ref(false)
 const error = ref('')
 
 const board = computed(() => boards.value.find((b) => b.slug === route.params.slug))
+
+const sortKey = computed(() => (route.query.sort || 'created').toString())
+const sortRange = computed(() => (route.query.range || 'week').toString())
+
+const sortOptions = [
+  { value: 'created', label: '发帖时间' },
+  { value: 'updated', label: '最后更新时间' },
+  { value: 'commented', label: '最后评论时间' },
+  { value: 'hot_week', label: '热度（周）' },
+  { value: 'hot_month', label: '热度（月）' },
+]
+
+const sortUiValue = computed(() => {
+  if (sortKey.value === 'hot') return `hot_${sortRange.value}`
+  if (sortKey.value === 'hot_week') return 'hot_week'
+  if (sortKey.value === 'hot_month') return 'hot_month'
+  return sortKey.value
+})
 
 const RIGHT_TOP_COUNT = 3
 
@@ -115,13 +134,37 @@ async function loadPosts() {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await apiGet('/api/posts/', { __skipAuth: true, params: { board: board.value.id } }, 8000)
+    const params = { board: board.value.id }
+    const sk = sortKey.value
+    if (sk === 'hot_week' || sk === 'hot_month') {
+      params.sort = 'hot'
+      params.range = sk === 'hot_month' ? 'month' : 'week'
+    } else if (sk === 'hot') {
+      params.sort = 'hot'
+      params.range = sortRange.value === 'month' ? 'month' : 'week'
+    } else {
+      params.sort = sk
+    }
+    const { data } = await apiGet('/api/posts/', { __skipAuth: true, params }, 8000)
     posts.value = unwrapList(data)
   } catch (e) {
     error.value = '加载帖子失败。'
   } finally {
     loading.value = false
   }
+}
+
+function onChangeSort(e) {
+  const v = (e?.target?.value || 'created').toString()
+  if (v === 'hot_week') {
+    router.replace({ query: { ...(route.query || {}), sort: 'hot', range: 'week' } })
+    return
+  }
+  if (v === 'hot_month') {
+    router.replace({ query: { ...(route.query || {}), sort: 'hot', range: 'month' } })
+    return
+  }
+  router.replace({ query: { ...(route.query || {}), sort: v, range: undefined } })
 }
 
 async function loadAll() {
@@ -143,6 +186,8 @@ async function loadAll() {
 
 onMounted(loadAll)
 watch(() => route.params.slug, loadAll)
+watch(() => route.query.sort, loadPosts)
+watch(() => route.query.range, loadPosts)
 
 watch(
   () => heroSlides.value.length,
@@ -169,8 +214,20 @@ onUnmounted(() => {
         <div class="muted">{{ board?.description || '浏览与发布内容' }}</div>
       </div>
       <div class="row">
+        <label class="row" style="gap: 8px">
+          <span class="muted" style="font-size: 12px">排序</span>
+          <select class="btn" :value="sortUiValue" @change="onChangeSort">
+            <option v-for="o in sortOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </label>
         <RouterLink class="btn" to="/">返回</RouterLink>
-        <RouterLink class="btn btn-primary" to="/posts/new">发帖</RouterLink>
+        <RouterLink
+          v-if="board?.slug !== 'announcements' || auth.state.me?.is_staff"
+          class="btn btn-primary"
+          :to="`/posts/new?board=${board?.slug || ''}`"
+        >
+          发帖
+        </RouterLink>
       </div>
     </div>
 

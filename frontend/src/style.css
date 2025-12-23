@@ -69,8 +69,8 @@ a {
 }
 
 .avatar-btn {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
   border: 1px solid #e5e7eb;
   background: #ffffff;
@@ -119,8 +119,25 @@ a {
   display: flex;
   gap: 12px;
   align-items: center;
-  overflow-x: auto;
-  white-space: nowrap;
+  overflow: visible;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.subnav-left,
+.subnav-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.subnav-right {
+  margin-left: auto;
+}
+
+.subnav-strong {
+  font-weight: 800;
 }
 
 .subnav-link {
@@ -133,6 +150,46 @@ a {
 .subnav-link.router-link-active {
   font-weight: 700;
   border-bottom-color: #111827;
+}
+
+/* Subnav grouped menu (站务) */
+.subnav-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.subnav-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+}
+
+.subnav-menu-panel {
+  /* Keep in DOM so we can animate + delay close. */
+  display: grid;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease, visibility 0s linear 150ms;
+}
+
+.subnav-menu:hover .subnav-menu-panel,
+.subnav-menu:focus-within .subnav-menu-panel {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 120ms ease, visibility 0s;
+}
+
+.subnav-menu-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  min-width: 200px;
+  /* Add an invisible hover bridge so the menu doesn't close while moving down. */
+  padding: 10px;
+  padding-top: 18px;
+  gap: 8px;
 }
 
 /* Modal (minimal) */
