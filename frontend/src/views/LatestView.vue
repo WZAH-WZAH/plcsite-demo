@@ -1,102 +1,77 @@
 <script setup>
-import { onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { apiGet, unwrapList } from '../api'
-import { auth } from '../auth'
-
-const posts = ref([])
-const loading = ref(false)
-const error = ref('')
-
-function statusText(s) {
-  if (s === 'published') return '已发布'
-  if (s === 'pending') return '待审核'
-  if (s === 'rejected') return '已拒绝'
-  return s || ''
-}
-
-function fmtTime(s) {
-  try {
-    return new Date(s).toLocaleString()
-  } catch {
-    return ''
-  }
-}
-
-function stripMarkdown(text) {
-  const t = (text || '').toString()
-  if (!t) return ''
-  // minimal cleanup for excerpts (avoid rendering markdown here)
-  return t
-    .replaceAll(/```[\s\S]*?```/g, '')
-    .replaceAll(/`[^`]*`/g, '')
-    .replaceAll(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replaceAll(/\[[^\]]*\]\([^)]*\)/g, '$1')
-    .replaceAll(/#+\s+/g, '')
-    .replaceAll(/[*_~>]/g, '')
-    .replaceAll(/\n+/g, ' ')
-    .trim()
-}
-
-function excerpt(text, n = 180) {
-  const s = stripMarkdown(text)
-  if (!s) return ''
-  return s.length > n ? s.slice(0, n) + '…' : s
-}
-
-async function loadPosts() {
-  loading.value = true
-  error.value = ''
-  try {
-    const { data } = await apiGet('/api/posts/feed/latest/', { __skipAuth: true }, 8000)
-    posts.value = unwrapList(data)
-  } catch (e) {
-    error.value = '加载帖子失败。'
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadPosts)
-</script>
-
-<template>
-  <div class="stack">
-    <div class="home-head">
-      <div>
-        <h2 class="home-title">最近更新</h2>
-        <div class="muted">按更新时间浏览最新内容（时间线）</div>
-      </div>
-      <div class="row">
-        <RouterLink class="btn" to="/">返回</RouterLink>
-        <RouterLink class="btn btn-primary" to="/posts/new">发帖</RouterLink>
+  import { ref, onMounted } from 'vue'
+  import { apiGet, unwrapList } from '../api'
+  import TimelineItem from '../components/TimelineItem.vue' // 引入上面的组件
+  
+  const posts = ref([])
+  const loading = ref(true)
+  
+  onMounted(async () => {
+    try {
+      const { data } = await apiGet('/api/posts/feed/latest/', { __skipAuth: true })
+      posts.value = unwrapList(data)
+    } finally {
+      loading.value = false
+    }
+  })
+  </script>
+  
+  <template>
+    <div style="background-color: #ffffff; min-height: 100vh;">
+      <div class="timeline-wrapper">
+        
+        <div class="timeline-header">
+          <h2>最新动态</h2>
+        </div>
+  
+        <div v-if="loading" style="padding: 20px; text-align: center; color: #6b7280;">
+          正在加载动态...
+        </div>
+        
+        <div v-else class="timeline-feed">
+          <TimelineItem 
+            v-for="p in posts" 
+            :key="p.id" 
+            :post="p" 
+          />
+        </div>
+  
+        <div v-if="!loading && posts.length === 0" style="padding: 40px; text-align: center; color: #6b7280;">
+          暂无最新内容
+        </div>
+  
       </div>
     </div>
-
-    <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
-
-    <div v-if="loading" class="muted">加载中…</div>
-
-    <div v-else class="timeline">
-      <RouterLink v-for="p in posts" :key="p.id" class="timeline-item" :to="`/posts/${p.id}`">
-        <div class="timeline-main">
-          <div class="timeline-meta">
-            <span style="font-weight: 700">{{ p.author_username }}</span>
-            <span class="muted">· {{ fmtTime(p.updated_at || p.created_at) }}</span>
-            <span class="muted" v-if="p.board_slug">· {{ p.board_slug }}</span>
-            <span class="muted" v-if="auth.state.me">· {{ statusText(p.status) }}</span>
-          </div>
-          <div class="timeline-title">{{ p.title }}</div>
-          <div v-if="p.body" class="timeline-excerpt muted">{{ excerpt(p.body) }}</div>
-          <div class="timeline-cta">查看全文</div>
-        </div>
-
-        <div v-if="p.cover_image_url" class="timeline-media">
-          <img :src="p.cover_image_url" alt="cover" />
-        </div>
-      </RouterLink>
-
-      <div v-if="posts.length === 0" class="muted">暂无帖子</div>
-    </div>
-  </div>
-</template>
+  </template>
+  
+  <style scoped>
+  /* 模拟 X 的中间栏宽度 */
+  .timeline-wrapper {
+    max-width: 600px; /* 经典推特宽度 */
+    margin: 0 auto;   /* 居中 */
+    border-left: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
+    min-height: 100vh;
+  }
+  
+  .timeline-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.85); /* 毛玻璃背景 */
+    backdrop-filter: blur(12px);
+    padding: 0 16px;
+    height: 53px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #e5e7eb;
+    cursor: pointer;
+  }
+  
+  .timeline-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+  }
+  </style>
