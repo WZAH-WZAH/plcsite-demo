@@ -10,7 +10,8 @@ class PostCreateSerializerExtrasTests(TestCase):
 	def setUp(self):
 		self.client = APIClient()
 		self.user = get_user_model().objects.create_user(username='u1', password='pw')
-		self.board = Board.objects.create(slug='games', title='游戏', description='', sort_order=0, is_active=True)
+		Board.objects.filter(slug='test-games').delete()
+		self.board = Board.objects.create(slug='test-games', title='游戏', description='', sort_order=0, is_active=True)
 
 	def test_create_post_with_remove_cover_image_does_not_error(self):
 		self.client.force_authenticate(user=self.user)

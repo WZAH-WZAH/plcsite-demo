@@ -2,18 +2,72 @@ from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from accounts.audit import write_audit_log
 
 from .models import UserFollow
 from .serializers import MeSerializer, RegisterSerializer
+from .services import (
+    record_login_day,
+    try_award_checkin_points,
+)
 
 
 User = get_user_model()
+
+
+def _year_window_aware() -> tuple[timezone.datetime, timezone.datetime]:
+    """Return [start, end) for the current natural year in current TZ."""
+
+    tz = timezone.get_current_timezone()
+    today = timezone.localdate()
+    start = timezone.datetime(today.year, 1, 1)
+    end = timezone.datetime(today.year + 1, 1, 1)
+    if timezone.is_naive(start):
+        start = timezone.make_aware(start, tz)
+    if timezone.is_naive(end):
+        end = timezone.make_aware(end, tz)
+    return start, end
+
+
+def _count_audit_actions(user, action: str) -> int:
+    from .models import AuditLog
+
+    start, end = _year_window_aware()
+    return AuditLog.objects.filter(actor=user, action=action, created_at__gte=start, created_at__lt=end).count()
+
+
+def _reject_angle_brackets(s: str) -> str:
+    if '<' in s or '>' in s:
+        raise ValueError('不允许包含 < 或 >。')
+    return s
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """JWT login that also records daily login stats."""
+
+    @method_decorator(ratelimit(key='ip', rate='30/m', block=True))
+    def post(self, request, *args, **kwargs):
+        resp = super().post(request, *args, **kwargs)
+        try:
+            # TokenObtainPairView sets serializer on self.
+            ser = self.get_serializer(data=request.data)
+            ser.is_valid(raise_exception=True)
+            user = getattr(ser, 'user', None)
+            if user is not None:
+                record_login_day(user)
+        except Exception:
+            # Do not break login if stats fail.
+            pass
+        return resp
 
 
 class RegisterView(APIView):
@@ -24,7 +78,17 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response({'id': user.id, 'username': user.username}, status=status.HTTP_201_CREATED)
+        # Ensure pid exists (8-digit numeric string).
+        try:
+            if not getattr(user, 'pid', None):
+                user.pid = str(int(user.id)).zfill(8)
+                user.save(update_fields=['pid'])
+        except Exception:
+            pass
+        return Response(
+            {'id': user.id, 'pid': getattr(user, 'pid', ''), 'nickname': getattr(user, 'nickname', ''), 'username': user.username},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MeView(APIView):
@@ -32,6 +96,173 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(MeSerializer(request.user, context={'request': request}).data)
+
+
+class MeCheckinView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        awarded, new_balance = try_award_checkin_points(user, points=2)
+        return Response({'awarded': bool(awarded), 'delta': 2 if awarded else 0, 'plcoin': int(new_balance)}, status=status.HTTP_200_OK)
+
+
+class MeBioView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        bio = str(request.data.get('bio') or '')
+        bio = bio.strip()
+        if len(bio) > 200:
+            return Response({'bio': ['长度不能超过 200。']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            bio = _reject_angle_brackets(bio)
+        except ValueError as exc:
+            return Response({'bio': [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+        user.bio = bio
+        user.save(update_fields=['bio'])
+        write_audit_log(actor=user, action='user.bio.update', target_type='user', target_id=str(user.id), request=request)
+        return Response({'bio': user.bio}, status=status.HTTP_200_OK)
+
+
+class MeNicknameView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    COST = 3
+    LIMIT_PER_YEAR = 12
+
+    def post(self, request):
+        user = request.user
+        nickname = str(request.data.get('nickname') or '').strip()
+        if not nickname:
+            return Response({'nickname': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if len(nickname) > 20:
+            return Response({'nickname': ['长度不能超过 20。']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            nickname = _reject_angle_brackets(nickname)
+        except ValueError as exc:
+            return Response({'nickname': [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+
+        used = _count_audit_actions(user, 'user.nickname.update')
+        if used >= self.LIMIT_PER_YEAR:
+            return Response({'detail': '本年度昵称修改次数已用完。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        cost = int(self.COST)
+        points = int(getattr(user, 'activity_score', 0) or 0)
+        if points < cost:
+            return Response({'detail': 'PLCoin 不足，无法修改昵称。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if (getattr(user, 'nickname', '') or '').strip() == nickname:
+            return Response({'nickname': nickname, 'plcoin': points, 'used': used, 'limit': self.LIMIT_PER_YEAR}, status=status.HTTP_200_OK)
+
+        user.nickname = nickname
+        user.activity_score = points - cost
+        user.save(update_fields=['nickname', 'activity_score'])
+
+        write_audit_log(
+            actor=user,
+            action='user.nickname.update',
+            target_type='user',
+            target_id=str(user.id),
+            request=request,
+            metadata={'cost': cost, 'nickname': nickname},
+        )
+
+        return Response(
+            {
+                'nickname': user.nickname,
+                'plcoin': int(user.activity_score),
+                'used': used + 1,
+                'limit': self.LIMIT_PER_YEAR,
+                'cost': cost,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MeUsernameView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    COST = 10
+    LIMIT_PER_YEAR = 4
+
+    def post(self, request):
+        user = request.user
+        username = str(request.data.get('username') or '').strip().lower()
+        if not username:
+            return Response({'username': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if len(username) > 20:
+            return Response({'username': ['长度不能超过 20。']}, status=status.HTTP_400_BAD_REQUEST)
+        if not username.startswith('@'):
+            return Response({'username': ['必须以 @ 开头。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        import re
+
+        if not re.match(r'^@[A-Za-z0-9_]+$', username):
+            return Response({'username': ['仅允许字母/数字/下划线。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        # No-op (case-insensitive)
+        if (getattr(user, 'username', '') or '').lower() == username:
+            return Response({'username': user.username, 'plcoin': int(getattr(user, 'activity_score', 0) or 0)}, status=status.HTTP_200_OK)
+
+        # Uniqueness (case-insensitive)
+        if User.objects.filter(username__iexact=username).exclude(id=user.id).exists():
+            return Response({'username': ['已被占用。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        used = _count_audit_actions(user, 'user.username.update')
+        if used >= self.LIMIT_PER_YEAR:
+            return Response({'detail': '本年度用户名修改次数已用完。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        cost = int(self.COST)
+        points = int(getattr(user, 'activity_score', 0) or 0)
+        if points < cost:
+            return Response({'detail': 'PLCoin 不足，无法修改用户名。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.username = username
+        user.activity_score = points - cost
+        user.save(update_fields=['username', 'activity_score'])
+
+        write_audit_log(
+            actor=user,
+            action='user.username.update',
+            target_type='user',
+            target_id=str(user.id),
+            request=request,
+            metadata={'cost': cost, 'username': username},
+        )
+
+        return Response(
+            {
+                'username': user.username,
+                'plcoin': int(user.activity_score),
+                'used': used + 1,
+                'limit': self.LIMIT_PER_YEAR,
+                'cost': cost,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MePostsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from forum.models import Post
+        from forum.serializers import PostSerializer
+
+        qs = (
+            Post.objects.filter(author=request.user)
+            .select_related('board', 'author', 'reviewed_by')
+            .prefetch_related('resource__links')
+            .order_by('-created_at', '-id')
+        )
+
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(qs, request)
+        ser = PostSerializer(page, many=True, context={'request': request})
+        return paginator.get_paginated_response(ser.data)
 
 
 class MeAvatarView(APIView):

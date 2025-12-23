@@ -33,6 +33,8 @@ class BoardSerializer(serializers.ModelSerializer):
 
 class PostSerializer(serializers.ModelSerializer):
     author_username = serializers.CharField(source='author.username', read_only=True)
+    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
+    author_pid = serializers.CharField(source='author.pid', read_only=True)
     board_slug = serializers.CharField(source='board.slug', read_only=True)
     cover_image_url = serializers.SerializerMethodField(read_only=True)
     # Social fields (interaction layer)
@@ -59,7 +61,9 @@ class PostSerializer(serializers.ModelSerializer):
             'board',
             'board_slug',
             'author',
+            'author_nickname',
             'author_username',
+            'author_pid',
             'title',
 			'cover_image',
 			'cover_image_url',
@@ -95,7 +99,9 @@ class PostSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'views_count',
+            'author_nickname',
             'author_username',
+            'author_pid',
             'board_slug',
             'cover_image_url',
             'hot_score_100',
@@ -147,6 +153,7 @@ class PostSerializer(serializers.ModelSerializer):
 
 class CommentSerializer(serializers.ModelSerializer):
     author_username = serializers.CharField(source='author.username', read_only=True)
+    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
     parent_id = serializers.IntegerField(source='parent.id', allow_null=True, read_only=True)
 
     class Meta:
@@ -156,6 +163,7 @@ class CommentSerializer(serializers.ModelSerializer):
             'post',
             'parent_id',
             'author',
+            'author_nickname',
             'author_username',
             'body',
             'is_deleted',
@@ -165,6 +173,7 @@ class CommentSerializer(serializers.ModelSerializer):
         read_only_fields = (
             'post',
             'author',
+            'author_nickname',
             'author_username',
             'is_deleted',
             'created_at',

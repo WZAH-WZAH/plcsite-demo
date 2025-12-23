@@ -10,7 +10,17 @@ const filteredLogs = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return logs.value
   return logs.value.filter((l) => {
-    const hay = [l.action, l.actor, l.target_type, l.target_id, l.ip]
+    const hay = [
+      l.action,
+      l.actor_nickname,
+      l.actor_username,
+      l.actor_pid,
+      l.actor_id,
+      l.actor,
+      l.target_type,
+      l.target_id,
+      l.ip,
+    ]
       .map((x) => String(x || '').toLowerCase())
       .join(' ')
     return hay.includes(s)
@@ -60,7 +70,14 @@ onMounted(load)
         <div class="row" style="justify-content: space-between">
           <div>
             <div style="font-weight: 700">{{ l.action }}</div>
-            <div class="muted">{{ new Date(l.created_at).toLocaleString() }} · actor={{ l.actor || 'null' }} · ip={{ l.ip || '-' }}</div>
+            <div class="muted">
+              {{ new Date(l.created_at).toLocaleString() }} ·
+              actor={{ l.actor_nickname || l.actor_username || l.actor || 'null' }}
+              <template v-if="l.actor_nickname && l.actor_username"> · {{ l.actor_username }}</template>
+              <template v-if="l.actor_pid"> · PID {{ l.actor_pid }}</template>
+              <template v-if="l.actor_id"> · #{{ l.actor_id }}</template>
+              · ip={{ l.ip || '-' }}
+            </div>
             <div class="muted" v-if="l.target_type">target={{ l.target_type }}#{{ l.target_id }}</div>
           </div>
           <pre class="muted" style="max-width: 420px; overflow: auto; margin: 0; white-space: pre-wrap">

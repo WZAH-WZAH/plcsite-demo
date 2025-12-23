@@ -12,6 +12,8 @@ class ResourceLinkSerializer(serializers.ModelSerializer):
 class ResourceEntrySerializer(serializers.ModelSerializer):
     links = ResourceLinkSerializer(many=True, read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_nickname = serializers.CharField(source='created_by.nickname', read_only=True)
+    created_by_pid = serializers.CharField(source='created_by.pid', read_only=True)
 
     class Meta:
         model = ResourceEntry
@@ -21,7 +23,9 @@ class ResourceEntrySerializer(serializers.ModelSerializer):
             'title',
             'description',
             'created_by',
+            'created_by_nickname',
             'created_by_username',
+            'created_by_pid',
             'status',
             'reviewed_by',
             'reviewed_at',

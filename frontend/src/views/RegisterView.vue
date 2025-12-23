@@ -6,11 +6,34 @@ import { api } from '../api'
 
 const router = useRouter()
 
+const nickname = ref('')
 const username = ref('')
 const email = ref('')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
+
+function normalizeHandle(v) {
+  const s = String(v || '').trim().toLowerCase()
+  return s
+}
+
+function validateNickname(v) {
+  const s = String(v || '').trim()
+  if (!s) return '昵称必填。'
+  if (s.length > 20) return '昵称长度不能超过 20。'
+  if (s.includes('<') || s.includes('>')) return '昵称不允许包含 < 或 >。'
+  return ''
+}
+
+function validateHandle(v) {
+  const s = normalizeHandle(v)
+  if (!s) return '用户名必填。'
+  if (s.length > 20) return '用户名长度不能超过 20。'
+  if (!s.startsWith('@')) return '用户名必须以 @ 开头。'
+  if (!/^@[a-z0-9_]+$/.test(s)) return '用户名仅允许字母/数字/下划线。'
+  return ''
+}
 
 function translateBackendMessage(msg) {
   if (!msg) return msg
@@ -46,7 +69,7 @@ watch([username, email, password], () => {
     serverCheck.value = { state: 'checking', errors: [] }
     try {
       const { data } = await api.post('/api/auth/password/check/', {
-        username: (username.value || '').trim(),
+        username: normalizeHandle(username.value),
         email: (email.value || '').trim(),
         password: p,
       })
@@ -103,6 +126,7 @@ function formatRegisterError(e) {
   const translate = translateBackendMessage
 
   const fieldName = {
+    nickname: '昵称',
     username: '用户名',
     email: '邮箱',
     password: '密码',
@@ -122,7 +146,24 @@ async function submit() {
   error.value = ''
   loading.value = true
   try {
-    await auth.register({ username: username.value.trim(), email: email.value.trim(), password: password.value })
+    const nickErr = validateNickname(nickname.value)
+    if (nickErr) {
+      error.value = nickErr
+      return
+    }
+    const handleErr = validateHandle(username.value)
+    if (handleErr) {
+      error.value = handleErr
+      return
+    }
+
+    const uname = normalizeHandle(username.value)
+    await auth.register({
+      nickname: nickname.value.trim(),
+      username: uname,
+      email: email.value.trim(),
+      password: password.value,
+    })
     await router.push('/')
   } catch (e) {
     error.value = formatRegisterError(e)
@@ -138,8 +179,14 @@ async function submit() {
 
     <div class="stack">
       <label class="stack" style="gap: 6px">
-        <div>用户名</div>
-        <input v-model="username" autocomplete="username" />
+        <div>昵称</div>
+        <input v-model="nickname" autocomplete="nickname" maxlength="20" />
+        <div class="muted" style="font-size: 12px">昵称可重复；用于全站展示。</div>
+      </label>
+      <label class="stack" style="gap: 6px">
+        <div>用户名（@开头）</div>
+        <input v-model="username" autocomplete="username" maxlength="20" placeholder="@username" />
+        <div class="muted" style="font-size: 12px">仅字母/数字/下划线；大小写不敏感；全站唯一。</div>
       </label>
       <label class="stack" style="gap: 6px">
         <div>邮箱（可选）</div>

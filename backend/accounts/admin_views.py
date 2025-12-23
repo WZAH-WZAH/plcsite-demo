@@ -10,6 +10,7 @@ from .audit import write_audit_log
 from .models import AuditLog
 from .permissions import IsAdmin
 from .serializers import AdminUserSerializer
+from .models import StaffBoardPermission
 
 User = get_user_model()
 
@@ -92,7 +93,12 @@ class AdminAuditLogListView(APIView):
             {
                 'id': log.id,
                 'created_at': log.created_at,
+                # Keep legacy 'actor' for backward compatibility (username).
                 'actor': log.actor.username if log.actor else None,
+                'actor_username': log.actor.username if log.actor else None,
+                'actor_nickname': log.actor.nickname if log.actor else None,
+                'actor_pid': log.actor.pid if log.actor else None,
+                'actor_id': log.actor.id if log.actor else None,
                 'action': log.action,
                 'target_type': log.target_type,
                 'target_id': log.target_id,
@@ -155,3 +161,94 @@ class AdminRevokeStaffView(APIView):
         )
 
         return Response(AdminUserSerializer(target).data)
+
+
+class AdminUserBoardPermsView(APIView):
+    """Superuser configures staff permissions per board."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request, user_id: int):
+        try:
+            target = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        perms = (
+            StaffBoardPermission.objects.filter(user=target)
+            .select_related('board')
+            .order_by('board_id')
+        )
+        data = {
+            'staff_board_scoped': bool(getattr(target, 'staff_board_scoped', False)),
+            'permissions': [
+                {
+                    'board_id': p.board_id,
+                    'board_slug': getattr(p.board, 'slug', ''),
+                    'board_title': getattr(p.board, 'title', ''),
+                    'can_moderate': bool(p.can_moderate),
+                    'can_delete': bool(p.can_delete),
+                }
+                for p in perms
+            ],
+        }
+        return Response(data)
+
+    def put(self, request, user_id: int):
+        try:
+            target = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        staff_board_scoped = bool(request.data.get('staff_board_scoped', False))
+        items = request.data.get('permissions')
+        if items is None:
+            items = []
+        if not isinstance(items, list):
+            return Response({'detail': 'permissions must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        cleaned: list[dict] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                board_id = int(raw.get('board_id'))
+            except Exception:
+                continue
+            cleaned.append(
+                {
+                    'board_id': board_id,
+                    'can_moderate': bool(raw.get('can_moderate', False)),
+                    'can_delete': bool(raw.get('can_delete', False)),
+                }
+            )
+
+        # Persist
+        from django.db import transaction
+
+        with transaction.atomic():
+            target.staff_board_scoped = staff_board_scoped
+            target.save(update_fields=['staff_board_scoped'])
+            StaffBoardPermission.objects.filter(user=target).delete()
+            StaffBoardPermission.objects.bulk_create(
+                [
+                    StaffBoardPermission(
+                        user=target,
+                        board_id=item['board_id'],
+                        can_moderate=item['can_moderate'],
+                        can_delete=item['can_delete'],
+                    )
+                    for item in cleaned
+                ]
+            )
+
+        write_audit_log(
+            actor=request.user,
+            action='user.staff_board_perms.update',
+            target_type='user',
+            target_id=str(target.id),
+            request=request,
+            metadata={'staff_board_scoped': staff_board_scoped, 'count': len(cleaned)},
+        )
+
+        return self.get(request, user_id=user_id)

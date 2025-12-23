@@ -10,6 +10,7 @@ const props = defineProps({
 
 const to = computed(() => `/posts/${props.post?.id}`)
 const views = computed(() => Number(props.post?.views_count || 0))
+const authorLabel = computed(() => props.post?.author_nickname || props.post?.author_username || '')
 </script>
 
 <template>
@@ -35,7 +36,7 @@ const views = computed(() => Number(props.post?.views_count || 0))
       <div v-if="meta" class="muted bili-meta">{{ meta }}</div>
 
       <div class="bili-author">
-        <span class="up-icon">UP</span>{{ post?.author_username }}
+        <span class="up-icon">UP</span>{{ authorLabel }}
       </div>
     </div>
   </RouterLink>

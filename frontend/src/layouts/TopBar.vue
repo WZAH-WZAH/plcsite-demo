@@ -47,8 +47,10 @@ const avatarPreviewUrl = ref('')
 
 const meAvatarUrl = computed(() => auth.state.me?.avatar_url || '')
 const meInitial = computed(() => {
+  const n = (auth.state.me?.nickname || '').trim()
   const u = (auth.state.me?.username || '').trim()
-  return u ? u.slice(0, 1).toUpperCase() : 'U'
+  const s = n || u
+  return s ? s.slice(0, 1).toUpperCase() : 'U'
 })
 
 onMounted(async () => {

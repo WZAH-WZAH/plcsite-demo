@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
 class User(AbstractUser):
+	# Public identity
+	# - pid: system-generated 8-digit numeric string (may include leading zeros)
+	# - nickname: display name (can be duplicated)
+	# - username: handle, stored with leading '@', case-insensitive unique (enforced by app logic/migration)
+	pid = models.CharField(max_length=8, unique=True, null=True, blank=True, db_index=True)
+	nickname = models.CharField(max_length=20, blank=True, default='')
+	bio = models.CharField(max_length=200, blank=True, default='')
+
 	activity_score = models.PositiveIntegerField(default=0)
 	# 头像（个人中心改版用）。
 	# 备注：
@@ -15,6 +24,11 @@ class User(AbstractUser):
 	is_banned = models.BooleanField(default=False)
 	banned_until = models.DateTimeField(null=True, blank=True)
 	ban_reason = models.CharField(max_length=200, blank=True)
+
+	# Staff board permissions
+	# - When False: staff users keep legacy behavior (can moderate/delete across all boards).
+	# - When True: staff users can only moderate/delete boards explicitly granted.
+	staff_board_scoped = models.BooleanField(default=False)
 
 	@property
 	def level(self) -> int:
@@ -29,11 +43,12 @@ class User(AbstractUser):
 			return 3
 		if score >= 100:
 			return 2
-		return 1
+		return 0
 
 	@property
 	def daily_download_limit(self) -> int:
-		return {1: 3, 2: 5, 3: 8, 4: 12, 5: 20, 6: 30}.get(self.level, 3)
+		# Download quota is intentionally NOT tied to account level.
+		return 3
 
 	@property
 	def is_currently_banned(self) -> bool:
@@ -43,6 +58,11 @@ class User(AbstractUser):
 		if until is None:
 			return False
 		return until > timezone.now()
+
+	class Meta(AbstractUser.Meta):
+		constraints = [
+			models.UniqueConstraint(Lower('username'), name='accounts_user_username_lower_uniq'),
+		]
 
 
 class DailyDownloadStat(models.Model):
@@ -58,6 +78,47 @@ class DailyDownloadStat(models.Model):
 
 	def __str__(self) -> str:
 		return f"{self.user_id}@{self.date}: {self.count}"
+
+
+class DailyPointStat(models.Model):
+	"""Per-user daily point earning state.
+
+	We store a small amount of state so we can enforce daily caps and
+	"first time today" bonuses efficiently.
+	"""
+
+	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='daily_point_stats')
+	date = models.DateField(default=timezone.localdate)
+	post_points_earned = models.PositiveIntegerField(default=0)
+	checked_in = models.BooleanField(default=False)
+	got_first_comment_bonus = models.BooleanField(default=False)
+	got_first_favorite_bonus = models.BooleanField(default=False)
+
+	class Meta:
+		unique_together = (('user', 'date'),)
+		indexes = [
+			models.Index(fields=['user', 'date']),
+		]
+
+	def __str__(self) -> str:
+		return f"points:{self.user_id}@{self.date}"
+
+
+class DailyLoginStat(models.Model):
+	"""Tracks days a user has logged in (for cumulative login day count)."""
+
+	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='daily_login_stats')
+	date = models.DateField(default=timezone.localdate)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		unique_together = (('user', 'date'),)
+		indexes = [
+			models.Index(fields=['user', 'date']),
+		]
+
+	def __str__(self) -> str:
+		return f"login:{self.user_id}@{self.date}"
 
 
 class AuditLog(models.Model):
@@ -100,3 +161,24 @@ class UserFollow(models.Model):
 
 	def __str__(self) -> str:
 		return f"{self.follower_id}->{self.following_id}"
+
+
+class StaffBoardPermission(models.Model):
+	"""Per-board permissions for staff users.
+
+	Only takes effect when user.staff_board_scoped=True.
+	"""
+
+	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='staff_board_perms')
+	board = models.ForeignKey('forum.Board', on_delete=models.CASCADE, related_name='staff_perms')
+	can_moderate = models.BooleanField(default=False)
+	can_delete = models.BooleanField(default=False)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		unique_together = (('user', 'board'),)
+		indexes = [
+			models.Index(fields=['user', 'board']),
+			models.Index(fields=['user', 'can_moderate']),
+			models.Index(fields=['user', 'can_delete']),
+		]

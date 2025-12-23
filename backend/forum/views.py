@@ -22,6 +22,7 @@ from django_ratelimit.decorators import ratelimit
 
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
+from accounts.services import staff_allowed_board_ids, staff_can_moderate_board, staff_can_delete_board
 
 from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
 from .permissions import IsAuthorOrStaffOrReadOnly
@@ -266,10 +267,31 @@ class PostViewSet(viewsets.ModelViewSet):
                 resource_links = json.loads(resource_links)
             except json.JSONDecodeError:
                 resource_links = None
-        if not resource_links:
+        has_resource_links = bool(isinstance(resource_links, list) and len(resource_links) > 0)
+
+        # PLCoin: posting earns points (daily cap applies). First-time posting only.
+        try:
+            from accounts.services import try_award_post_points
+
+            base_points = 2 if has_resource_links else 1
+            awarded, new_balance = try_award_post_points(user, points=base_points, daily_cap=6)
+            if awarded > 0:
+                write_audit_log(
+                    actor=user,
+                    action='points.post',
+                    target_type='post',
+                    target_id=str(post.id),
+                    request=self.request,
+                    metadata={'awarded': int(awarded), 'balance': int(new_balance), 'has_resource_links': has_resource_links},
+                )
+        except Exception:
+            # Points should not block post creation.
+            pass
+
+        if not has_resource_links:
             return
 
-        if isinstance(resource_links, list) and len(resource_links) > 0:
+        if has_resource_links:
             resource_status = ResourceEntry.Status.PUBLISHED if user.is_staff else ResourceEntry.Status.PENDING
             resource = ResourceEntry.objects.create(
                 post=post,
@@ -515,6 +537,23 @@ class PostViewSet(viewsets.ModelViewSet):
             favorited = True
             audit_action = 'post.favorite'
 
+            # PLCoin: first favorite of the day +1
+            try:
+                from accounts.services import try_award_first_favorite_bonus
+
+                awarded, new_balance = try_award_first_favorite_bonus(user, points=1)
+                if awarded:
+                    write_audit_log(
+                        actor=user,
+                        action='points.favorite.first',
+                        target_type='post',
+                        target_id=str(post.id),
+                        request=request,
+                        metadata={'awarded': 1, 'balance': int(new_balance)},
+                    )
+            except Exception:
+                pass
+
         write_audit_log(
             actor=user,
             action=audit_action,
@@ -757,6 +796,23 @@ class PostViewSet(viewsets.ModelViewSet):
         body = serializer.validated_data['body']
         comment = Comment.objects.create(post=post, author=user, parent=parent_obj, body=body)
 
+        # PLCoin: first comment of the day +1
+        try:
+            from accounts.services import try_award_first_comment_bonus
+
+            awarded, new_balance = try_award_first_comment_bonus(user, points=1)
+            if awarded:
+                write_audit_log(
+                    actor=user,
+                    action='points.comment.first',
+                    target_type='comment',
+                    target_id=str(comment.id),
+                    request=request,
+                    metadata={'awarded': 1, 'balance': int(new_balance), 'post_id': post.id},
+                )
+        except Exception:
+            pass
+
         # Notifications
         try:
             if parent_obj is not None:
@@ -834,6 +890,12 @@ class CommentViewSet(viewsets.ModelViewSet):
         if not (is_author or getattr(user, 'is_staff', False)):
             raise PermissionDenied('Not allowed.')
 
+        # Scoped staff can only delete comments within allowed boards.
+        if (not is_author) and getattr(user, 'is_staff', False) and getattr(user, 'staff_board_scoped', False) and (not getattr(user, 'is_superuser', False)):
+            board_id = getattr(getattr(obj, 'post', None), 'board_id', None)
+            if not staff_can_delete_board(user, board_id):
+                raise PermissionDenied('Not allowed for this board.')
+
         if not obj.is_deleted:
             obj.is_deleted = True
             obj.body = ''
@@ -852,6 +914,9 @@ class CommentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='revisions', permission_classes=[IsModerator])
     def revisions(self, request, pk=None):
         post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
         qs = PostRevision.objects.select_related('editor').filter(post=post).order_by('sequence')
         data = [
             {
@@ -867,6 +932,9 @@ class CommentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='revisions/(?P<rev_id>[^/.]+)/diff', permission_classes=[IsModerator])
     def revision_diff(self, request, pk=None, rev_id=None):
         post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
         try:
             rev = PostRevision.objects.get(post=post, id=rev_id)
         except PostRevision.DoesNotExist:
@@ -905,6 +973,9 @@ class CommentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='moderation/pending', permission_classes=[IsModerator])
     def pending(self, request):
         qs = Post.objects.select_related('board', 'author').filter(status=Post.Status.PENDING).order_by('-created_at')
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            allowed = staff_allowed_board_ids(request.user, for_action='moderate')
+            qs = qs.filter(board_id__in=allowed)
         page = self.paginate_queryset(qs)
         if page is not None:
             return self.get_paginated_response(self.get_serializer(page, many=True).data)
@@ -913,6 +984,9 @@ class CommentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='approve', permission_classes=[IsModerator])
     def approve(self, request, pk=None):
         post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
         post.status = Post.Status.PUBLISHED
         post.reviewed_by = request.user
         post.reviewed_at = timezone.now()
@@ -930,6 +1004,9 @@ class CommentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='reject', permission_classes=[IsModerator])
     def reject(self, request, pk=None):
         post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
         reason = (request.data.get('reason') or '')[:200]
         post.status = Post.Status.REJECTED
         post.reviewed_by = request.user

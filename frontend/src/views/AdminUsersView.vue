@@ -10,11 +10,22 @@ const busy = ref({})
 const banDays = ref({})
 const banReason = ref({})
 
+const permsOpenUserId = ref(null)
+const permsBusy = ref(false)
+const permsError = ref('')
+const perms = ref({ staff_board_scoped: false, permissions: [] })
+
 const filteredUsers = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return users.value
-  return users.value.filter((u) => String(u.username || '').toLowerCase().includes(s) || String(u.id) === s)
+  return users.value.filter((u) => userHaystack(u).includes(s))
 })
+
+function userHaystack(u) {
+  return [u?.nickname, u?.username, u?.pid, u?.id]
+    .map((x) => String(x || '').toLowerCase())
+    .join(' ')
+}
 
 async function load() {
   error.value = ''
@@ -84,6 +95,51 @@ async function revokeStaff(userId) {
   }
 }
 
+async function toggleBoardPerms(u) {
+  permsError.value = ''
+  if (permsOpenUserId.value === u.id) {
+    permsOpenUserId.value = null
+    return
+  }
+  permsOpenUserId.value = u.id
+  permsBusy.value = true
+  try {
+    const { data } = await api.get(`/api/admin/users/${u.id}/board-perms/`)
+    perms.value = {
+      staff_board_scoped: !!data?.staff_board_scoped,
+      permissions: Array.isArray(data?.permissions) ? data.permissions : [],
+    }
+    perms.value.permissions.sort((a, b) => String(a?.title || '').localeCompare(String(b?.title || '')))
+  } catch (e) {
+    permsError.value = e?.response?.data?.detail || '加载板块权限失败。'
+  } finally {
+    permsBusy.value = false
+  }
+}
+
+async function saveBoardPerms() {
+  const userId = permsOpenUserId.value
+  if (!userId) return
+  permsBusy.value = true
+  permsError.value = ''
+  try {
+    const payload = {
+      staff_board_scoped: !!perms.value.staff_board_scoped,
+      permissions: (perms.value.permissions || []).map((p) => ({
+        board_id: p.board_id,
+        can_moderate: !!p.can_moderate,
+        can_delete: !!p.can_delete,
+      })),
+    }
+    await api.put(`/api/admin/users/${userId}/board-perms/`, payload)
+    await load()
+  } catch (e) {
+    permsError.value = e?.response?.data?.detail || '保存失败。'
+  } finally {
+    permsBusy.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -106,7 +162,12 @@ onMounted(load)
       <div v-for="u in filteredUsers" :key="u.id" class="card stack" style="gap: 10px">
         <div class="row" style="justify-content: space-between">
           <div>
-            <div style="font-weight: 700">{{ u.username }} <span class="muted">#{{ u.id }}</span></div>
+            <div style="font-weight: 700">
+              {{ u.nickname || u.username }}
+              <span v-if="u.nickname && u.username" class="muted"> · {{ u.username }}</span>
+              <span v-if="u.pid" class="muted"> · PID {{ u.pid }}</span>
+              <span class="muted"> · #{{ u.id }}</span>
+            </div>
             <div class="muted">Lv{{ u.level }} · 活跃度 {{ u.activity_score }} · 限额 {{ u.daily_download_limit }}/天</div>
             <div class="muted" style="margin-top: 4px">
               权限：
@@ -138,6 +199,15 @@ onMounted(load)
               >
                 取消管理员
               </button>
+
+              <button
+                v-if="u.is_staff && !u.is_superuser"
+                class="btn"
+                :disabled="permsBusy"
+                @click="toggleBoardPerms(u)"
+              >
+                板块权限
+              </button>
             </template>
 
             <button v-if="!u.is_banned" class="btn" :disabled="busy[u.id]" @click="ban(u.id)">封禁</button>
@@ -153,6 +223,39 @@ onMounted(load)
             style="max-width: 180px"
           />
           <input v-model="banReason[u.id]" placeholder="原因（可选）" maxlength="200" />
+        </div>
+
+        <div v-if="auth.state.me?.is_superuser && u.is_staff && !u.is_superuser && permsOpenUserId === u.id" class="card stack">
+          <div class="row" style="justify-content: space-between">
+            <div style="font-weight: 700">分板块权限</div>
+            <button class="btn" :disabled="permsBusy" @click="saveBoardPerms">保存</button>
+          </div>
+
+          <div v-if="permsError" class="muted">{{ permsError }}</div>
+
+          <label class="row" style="gap: 8px">
+            <input type="checkbox" v-model="perms.staff_board_scoped" />
+            <span class="muted">启用后该管理员的审核/删除会按板块授权收敛</span>
+          </label>
+
+          <div class="muted" v-if="perms.permissions.length === 0">暂无板块</div>
+
+          <div v-for="p in perms.permissions" :key="p.board_id" class="row" style="justify-content: space-between; gap: 10px">
+            <div>
+              <div style="font-weight: 600">{{ p.title || p.slug || ('#' + p.board_id) }}</div>
+              <div class="muted" v-if="p.slug">{{ p.slug }}</div>
+            </div>
+            <div class="row" style="gap: 12px; flex-wrap: wrap">
+              <label class="row" style="gap: 6px">
+                <input type="checkbox" v-model="p.can_moderate" />
+                <span class="muted">审核</span>
+              </label>
+              <label class="row" style="gap: 6px">
+                <input type="checkbox" v-model="p.can_delete" />
+                <span class="muted">删除</span>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 

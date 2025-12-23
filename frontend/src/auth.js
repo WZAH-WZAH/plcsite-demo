@@ -20,9 +20,9 @@ export const auth = {
     await this.loadMe()
   },
 
-  async register({ username, email, password }) {
+  async register({ nickname, username, email, password }) {
     this.state.error = null
-    await api.post('/api/auth/register/', { username, email, password })
+    await api.post('/api/auth/register/', { nickname, username, email, password })
     // 备注：首次注册后提示用户设置头像（TopBar 会读取该标记并弹窗一次）。
     localStorage.setItem('plc_avatar_prompt', '1')
     await this.login(username, password)

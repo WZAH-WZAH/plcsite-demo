@@ -144,7 +144,10 @@ onMounted(load)
           <div>
             <div style="font-weight: 700">{{ p.title }}</div>
             <div class="muted">
-              by {{ p.author_username }} · board={{ p.board_slug }} · 创建：{{ new Date(p.created_at).toLocaleString() }}
+              by {{ p.author_nickname || p.author_username }}
+              <span v-if="p.author_nickname && p.author_username"> · {{ p.author_username }}</span>
+              <span v-if="p.author_pid"> · PID {{ p.author_pid }}</span>
+              · board={{ p.board_slug }} · 创建：{{ new Date(p.created_at).toLocaleString() }}
               <span v-if="p.updated_at"> · 最后编辑：{{ new Date(p.updated_at).toLocaleString() }}</span>
             </div>
             <div v-if="p.body" class="muted" style="margin-top: 6px">
@@ -213,7 +216,12 @@ onMounted(load)
         <div class="row" style="justify-content: space-between">
           <div>
             <div style="font-weight: 700">{{ r.title }}</div>
-            <div class="muted">by {{ r.created_by_username || '未知' }} · {{ new Date(r.created_at).toLocaleString() }}</div>
+            <div class="muted">
+              by {{ r.created_by_nickname || r.created_by_username || '未知' }}
+              <span v-if="r.created_by_nickname && r.created_by_username"> · {{ r.created_by_username }}</span>
+              <span v-if="r.created_by_pid"> · PID {{ r.created_by_pid }}</span>
+              · {{ new Date(r.created_at).toLocaleString() }}
+            </div>
             <div class="muted" style="margin-top: 6px">
               关联帖子：
               <RouterLink v-if="r.post" class="btn" style="padding: 4px 8px" :to="`/posts/${r.post}`">#{{ r.post }}</RouterLink>

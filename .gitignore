@@ -1,0 +1,17 @@
+# Python
+**/__pycache__/
+**/*.py[cod]
+
+# Virtual env
+.venv/
+
+# Django local DB (dev)
+backend/db.sqlite3
+
+# Django generated assets
+backend/media/
+backend/staticfiles/
+
+# Frontend (kept here too, even though frontend has its own .gitignore)
+frontend/node_modules/
+frontend/dist/

@@ -39,6 +39,10 @@ const canDelete = computed(() => {
   return me.is_staff || me.username === post.value.author_username
 })
 
+const postAuthorNickname = computed(() => post.value?.author_nickname || '')
+const postAuthorUsername = computed(() => post.value?.author_username || '')
+const postAuthorDisplay = computed(() => postAuthorNickname.value || postAuthorUsername.value)
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -216,7 +220,9 @@ onMounted(load)
         <div>
           <h2 style="margin: 0 0 6px">{{ post?.title || '帖子' }}</h2>
           <div class="muted" v-if="post">
-            by {{ post.author_username }} · 创建：{{ new Date(post.created_at).toLocaleString() }}
+            by {{ postAuthorDisplay }}
+            <template v-if="postAuthorNickname && postAuthorUsername"> · {{ postAuthorUsername }}</template>
+            · 创建：{{ new Date(post.created_at).toLocaleString() }}
             <span v-if="post.updated_at"> · 最后编辑：{{ new Date(post.updated_at).toLocaleString() }}</span>
           </div>
         </div>
@@ -282,7 +288,9 @@ onMounted(load)
         <div v-for="c in commentTree" :key="c.id" class="card" style="background: #fafafa">
           <div class="row" style="justify-content: space-between">
             <div class="muted" style="font-size: 12px">
-              {{ c.author_username }} · {{ new Date(c.created_at).toLocaleString() }}
+              {{ c.author_nickname || c.author_username }}
+              <template v-if="c.author_nickname && c.author_username"> · {{ c.author_username }}</template>
+              · {{ new Date(c.created_at).toLocaleString() }}
               <span v-if="c.is_deleted"> · 已删除</span>
             </div>
             <div class="row" style="gap: 8px">
@@ -306,7 +314,9 @@ onMounted(load)
             <div v-for="r in c.replies" :key="r.id" class="card" style="background: #ffffff">
               <div class="row" style="justify-content: space-between">
                 <div class="muted" style="font-size: 12px">
-                  {{ r.author_username }} · {{ new Date(r.created_at).toLocaleString() }}
+                  {{ r.author_nickname || r.author_username }}
+                  <template v-if="r.author_nickname && r.author_username"> · {{ r.author_username }}</template>
+                  · {{ new Date(r.created_at).toLocaleString() }}
                   <span v-if="r.is_deleted"> · 已删除</span>
                 </div>
                 <button v-if="canDeleteComment(r)" class="btn" type="button" @click="deleteComment(r.id)">删除</button>

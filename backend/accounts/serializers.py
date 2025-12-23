@@ -2,17 +2,52 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .services import get_or_create_today_stat
+import re
+from django.utils import timezone
+
+from .services import get_login_days_count, get_or_create_today_point_stat, get_or_create_today_stat
 
 User = get_user_model()
+
+_HANDLE_RE = re.compile(r'^@[A-Za-z0-9_]+$')
+
+
+def _reject_angle_brackets(s: str) -> str:
+    if '<' in s or '>' in s:
+        raise serializers.ValidationError('不允许包含 < 或 >。')
+    return s
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    nickname = serializers.CharField(max_length=20, allow_blank=False, trim_whitespace=False)
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password')
+        fields = ('nickname', 'username', 'email', 'password')
+
+    def validate_nickname(self, value: str) -> str:
+        v = (value or '').strip()
+        if not v:
+            raise serializers.ValidationError('必填。')
+        if len(v) > 20:
+            raise serializers.ValidationError('长度不能超过 20。')
+        return _reject_angle_brackets(v)
+
+    def validate_username(self, value: str) -> str:
+        v = (value or '').strip()
+        if not v:
+            raise serializers.ValidationError('必填。')
+        if len(v) > 20:
+            raise serializers.ValidationError('长度不能超过 20。')
+        v = v.lower()
+        if not _HANDLE_RE.match(v):
+            raise serializers.ValidationError('必须以 @ 开头，且仅包含字母/数字/下划线。')
+
+        # Case-insensitive uniqueness.
+        if User.objects.filter(username__iexact=v).exists():
+            raise serializers.ValidationError('已被占用。')
+        return v
 
     def validate_password(self, value: str) -> str:
         validate_password(value)
@@ -23,6 +58,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         user = User(**validated_data)
         user.set_password(password)
         user.save()
+        # PID is a system-generated 8-digit numeric identifier.
+        try:
+            if not getattr(user, 'pid', None):
+                user.pid = str(int(user.id)).zfill(8)
+                user.save(update_fields=['pid'])
+        except Exception:
+            pass
         return user
 
 
@@ -32,6 +74,20 @@ class MeSerializer(serializers.ModelSerializer):
     downloads_today = serializers.SerializerMethodField()
     downloads_remaining_today = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
+    pid = serializers.CharField(read_only=True)
+    nickname = serializers.CharField(read_only=True)
+    bio = serializers.CharField(read_only=True)
+    plcoin = serializers.IntegerField(source='activity_score', read_only=True)
+    login_days = serializers.SerializerMethodField()
+    checked_in_today = serializers.SerializerMethodField()
+    post_points_earned_today = serializers.SerializerMethodField()
+    post_points_daily_cap = serializers.IntegerField(read_only=True, default=6)
+    nickname_change_cost = serializers.IntegerField(read_only=True, default=3)
+    nickname_changes_used = serializers.SerializerMethodField()
+    nickname_changes_limit = serializers.IntegerField(read_only=True, default=12)
+    username_change_cost = serializers.IntegerField(read_only=True, default=10)
+    username_changes_used = serializers.SerializerMethodField()
+    username_changes_limit = serializers.IntegerField(read_only=True, default=4)
     is_banned = serializers.BooleanField(read_only=True)
     banned_until = serializers.DateTimeField(read_only=True)
     ban_reason = serializers.CharField(read_only=True)
@@ -42,15 +98,29 @@ class MeSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             'id',
+            'pid',
+            'nickname',
             'username',
             'email',
+            'bio',
             'date_joined',
             'last_login',
             'activity_score',
+            'plcoin',
             'level',
             'daily_download_limit',
             'downloads_today',
             'downloads_remaining_today',
+            'login_days',
+            'checked_in_today',
+            'post_points_earned_today',
+            'post_points_daily_cap',
+            'nickname_change_cost',
+            'nickname_changes_used',
+            'nickname_changes_limit',
+            'username_change_cost',
+            'username_changes_used',
+            'username_changes_limit',
             'avatar_url',
             'is_banned',
             'banned_until',
@@ -84,6 +154,40 @@ class MeSerializer(serializers.ModelSerializer):
         remaining = int(obj.daily_download_limit) - int(stat.count)
         return max(0, remaining)
 
+    def get_login_days(self, obj) -> int:
+        return int(get_login_days_count(obj))
+
+    def _year_window(self):
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        start = timezone.datetime(today.year, 1, 1)
+        end = timezone.datetime(today.year + 1, 1, 1)
+        if timezone.is_naive(start):
+            start = timezone.make_aware(start, tz)
+        if timezone.is_naive(end):
+            end = timezone.make_aware(end, tz)
+        return start, end
+
+    def _count_actions(self, obj, action: str) -> int:
+        from .models import AuditLog
+
+        start, end = self._year_window()
+        return AuditLog.objects.filter(actor=obj, action=action, created_at__gte=start, created_at__lt=end).count()
+
+    def get_nickname_changes_used(self, obj) -> int:
+        return int(self._count_actions(obj, 'user.nickname.update'))
+
+    def get_username_changes_used(self, obj) -> int:
+        return int(self._count_actions(obj, 'user.username.update'))
+
+    def get_checked_in_today(self, obj) -> bool:
+        stat = get_or_create_today_point_stat(obj)
+        return bool(getattr(stat, 'checked_in', False))
+
+    def get_post_points_earned_today(self, obj) -> int:
+        stat = get_or_create_today_point_stat(obj)
+        return int(getattr(stat, 'post_points_earned', 0) or 0)
+
 
 class AdminUserSerializer(serializers.ModelSerializer):
     level = serializers.IntegerField(read_only=True)
@@ -93,11 +197,14 @@ class AdminUserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             'id',
+            'pid',
+            'nickname',
             'username',
             'email',
             'is_active',
             'is_staff',
             'is_superuser',
+            'staff_board_scoped',
             'activity_score',
             'level',
             'daily_download_limit',

@@ -23,6 +23,9 @@
     
     const timeDisplay = computed(() => formatXTime(props.post.created_at))
 
+    const displayNickname = computed(() => props.post?.author_nickname || props.post?.author_username || '用户')
+    const displayHandle = computed(() => props.post?.author_username || '')
+
     const excerpt = computed(() => {
       const raw = (props.post?.body || '').toString()
       const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
@@ -41,15 +44,15 @@
       <div class="x-item" @click="router.push(`/posts/${post.id}`)">
         <div class="x-avatar-area">
           <div class="x-avatar">
-            {{ post.author_username?.[0]?.toUpperCase() || 'U' }}
+            {{ displayNickname?.[0]?.toUpperCase() || 'U' }}
           </div>
         </div>
     
         <div class="x-content">
           
           <div class="x-header">
-            <span class="x-name">{{ post.author_username }}</span>
-            <span class="x-handle">@{{ post.author_username }}</span>
+            <span class="x-name">{{ displayNickname }}</span>
+            <span v-if="displayHandle" class="x-handle">{{ displayHandle }}</span>
             <span class="x-dot">·</span>
             <span class="x-time">{{ timeDisplay }}</span>
           </div>

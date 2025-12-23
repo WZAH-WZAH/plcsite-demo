@@ -19,7 +19,20 @@ class IsAuthorOrStaffOrReadOnly(permissions.BasePermission):
         is_author = getattr(obj, 'author_id', None) == getattr(user, 'id', None)
 
         if request.method == 'DELETE':
-            return bool(is_author or getattr(user, 'is_staff', False))
+            if is_author:
+                return True
+            if getattr(user, 'is_superuser', False):
+                return True
+            if getattr(user, 'is_staff', False):
+                if getattr(user, 'staff_board_scoped', False):
+                    try:
+                        from accounts.services import staff_can_delete_board
+
+                        return bool(staff_can_delete_board(user, getattr(obj, 'board_id', None)))
+                    except Exception:
+                        return False
+                return True
+            return False
 
         # PUT/PATCH/etc: only author
         return bool(is_author)
@@ -33,4 +46,19 @@ class IsCommentAuthorOrStaff(permissions.BasePermission):
         if not user or not user.is_authenticated:
             return False
         is_author = getattr(obj, 'author_id', None) == getattr(user, 'id', None)
-        return bool(is_author or getattr(user, 'is_staff', False))
+        if is_author:
+            return True
+        if getattr(user, 'is_superuser', False):
+            return True
+        if getattr(user, 'is_staff', False):
+            if getattr(user, 'staff_board_scoped', False):
+                try:
+                    from accounts.services import staff_can_delete_board
+
+                    post = getattr(obj, 'post', None)
+                    board_id = getattr(post, 'board_id', None)
+                    return bool(staff_can_delete_board(user, board_id))
+                except Exception:
+                    return False
+            return True
+        return False
