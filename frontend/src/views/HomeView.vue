@@ -2,6 +2,7 @@
   // Home page ("/")
   import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
   import { apiGet, unwrapList } from '../api'
+  // 引入你现有的组件
   import PostPreviewCard from '../components/PostPreviewCard.vue'
   
   const loading = ref(false)
@@ -18,6 +19,7 @@
   const boards = ref([])
   const boardRows = ref([]) 
 
+  // 首页不展示这些板块（后续再考虑在首页其它位置呈现）
   const homeExcludedBoardSlugs = new Set(['announcements', 'feedback', 'site-log', 'blackroom'])
   
   // --- 计算属性 ---
@@ -58,7 +60,7 @@
     }
   }
   
-  // 简单的并发限制
+  // 并发加载工具
   async function mapLimit(items, limit, mapper) {
     const out = []
     const queue = [...items]
@@ -87,36 +89,29 @@
     // 2. 获取右侧推荐
     try {
       const { data } = await apiGet('/api/posts/feed/hot/', { __skipAuth: true, params: { days: 7 } }, 5000)
-        const hotList = unwrapList(data)
-
-        // 注意：主页轮播是“运营位”（可能是外链/不绑定帖子），不能拿轮播的 id 去和帖子 id 做去重。
-        // 这里采用：热门优先 + 最新补齐，并只在 hot/latest 两个源之间按 post.id 去重。
-        const picked = []
-        const pickedIds = new Set()
-
-        for (const p of hotList) {
-          if (picked.length >= HERO_RIGHT_COUNT) break
-          if (p?.id == null) continue
-          if (homeExcludedBoardSlugs.has(p?.board_slug)) continue
-          if (pickedIds.has(p.id)) continue
-          picked.push(p)
-          pickedIds.add(p.id)
-        }
-
-        if (picked.length < HERO_RIGHT_COUNT) {
-          const { data: latestData } = await apiGet('/api/posts/feed/latest/', { __skipAuth: true }, 5000)
-          const latestList = unwrapList(latestData)
-          for (const p of latestList) {
-            if (picked.length >= HERO_RIGHT_COUNT) break
-            if (p?.id == null) continue
-            if (homeExcludedBoardSlugs.has(p?.board_slug)) continue
-            if (pickedIds.has(p.id)) continue
-            picked.push(p)
-            pickedIds.add(p.id)
+      const list = unwrapList(data)
+      // 过滤掉已经在轮播图里的帖子
+      const carouselIds = new Set(heroCarouselRaw.value.map(c => c.id))
+      heroRightRaw.value = list
+        .filter(p => !carouselIds.has(p.id))
+        .filter(p => !homeExcludedBoardSlugs.has(p?.board_slug))
+        .slice(0, HERO_RIGHT_COUNT)
+      
+      // 补齐逻辑
+      if (heroRightRaw.value.length < HERO_RIGHT_COUNT) {
+        const { data: latestData } = await apiGet('/api/posts/feed/latest/', { __skipAuth: true }, 5000)
+        const latestList = unwrapList(latestData)
+          .filter(p => !carouselIds.has(p.id))
+          .filter(p => !homeExcludedBoardSlugs.has(p?.board_slug))
+        const existingIds = new Set(heroRightRaw.value.map(p => p.id))
+        for (const p of latestList) {
+          if (heroRightRaw.value.length >= HERO_RIGHT_COUNT) break
+          if (!existingIds.has(p.id)) {
+            heroRightRaw.value.push(p)
+            existingIds.add(p.id)
           }
         }
-
-        heroRightRaw.value = picked
+      }
     } catch {
       heroRightRaw.value = []
     }
@@ -126,11 +121,11 @@
     const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 5000)
     boards.value = unwrapList(data).filter((b) => !homeExcludedBoardSlugs.has(b?.slug))
   
-    // 获取每个板块的前 6 个帖子
+    // 获取每个板块的前 5 个帖子 (为了适配一行5个的布局)
     const rows = await mapLimit(boards.value, 4, async (b) => {
       try {
         const { data: postsData } = await apiGet('/api/posts/', { __skipAuth: true, params: { board: b.id } }, 5000)
-        return { board: b, posts: unwrapList(postsData).slice(0, 6) }
+        return { board: b, posts: unwrapList(postsData).slice(0, 5) }
       } catch {
         return { board: b, posts: [] }
       }
@@ -177,7 +172,11 @@
   
       <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
       
-      <div v-if="!loading && (heroCurrent || heroRightPosts.length)" class="bili-recommend-box">
+      <div v-if="loading" class="bili-recommend-box" style="background: #f4f5f7; border-radius: 6px; align-items: center; justify-content: center; color: #999;">
+         加载推荐内容...
+      </div>
+  
+      <div v-else-if="heroCurrent || heroRightPosts.length" class="bili-recommend-box">
         
         <div class="bili-carousel-wrap">
           <component
@@ -215,42 +214,60 @@
         </div>
   
         <div class="bili-grid">
-          <PostPreviewCard v-for="p in heroRightPosts" :key="p.id" :post="p" />
+          <PostPreviewCard 
+            v-for="p in heroRightPosts" 
+            :key="p.id" 
+            :post="p" 
+          />
         </div>
       </div>
   
       <section v-for="row in boardRows" :key="row.board?.id" class="home-board">
-        <div class="row" style="justify-content: space-between">
-          <div>
-            <div style="font-weight: 800">{{ row.board?.title }}</div>
-            <div class="muted" style="font-size: 12px" v-if="row.board?.description">{{ row.board.description }}</div>
+        <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+             <div style="width:32px; height:32px; background:#f1f2f3; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#666; font-size: 14px; font-weight: bold;">
+               #
+             </div>
+             <div>
+               <div style="font-weight: 600; font-size: 18px; line-height: 1.2;">{{ row.board?.title }}</div>
+               <div class="muted" style="font-size: 12px" v-if="row.board?.description">{{ row.board.description }}</div>
+             </div>
           </div>
-          <RouterLink class="home-more" :to="`/b/${row.board.slug}`">查看更多</RouterLink>
+          <RouterLink class="btn btn-sm" :to="`/b/${row.board.slug}`">更多 ›</RouterLink>
         </div>
   
-        <div v-if="row.posts?.length" style="margin-top: 10px">
-          <div class="home-row-grid">
-            <PostPreviewCard v-for="p in row.posts" :key="p.id" :post="p" />
+        <div v-if="row.posts?.length">
+          <div class="bili-row-grid">
+            <PostPreviewCard 
+              v-for="p in row.posts" 
+              :key="p.id" 
+              :post="p" 
+            />
           </div>
         </div>
-        <div v-else class="muted" style="margin-top: 10px">该板块暂无可展示内容。</div>
+        <div v-else class="muted" style="margin-top: 10px; padding: 20px; text-align: center; background: #f9f9f9; border-radius: 6px;">
+          该板块暂无可展示内容。
+        </div>
       </section>
   
     </div>
   </template>
   
   <style scoped>
-  /* --- Bilibili 风格样式 --- */
+  /* 核心布局样式 
+    注意：卡片样式已移至 PostPreviewCard.vue，此处只需管理容器布局
+  */
   
+  /* 顶部推荐容器 */
   .bili-recommend-box {
     display: flex;
     gap: 12px;
     width: 100%;
-    height: 380px; 
-    margin-bottom: 20px;
+    height: 380px; /* 固定高度，确保左右对齐 */
+    margin-bottom: 30px;
   }
   
-  /* 左侧轮播 */
+  /* 左侧轮播图容器 */
   .bili-carousel-wrap {
     width: 42%; 
     height: 100%;
@@ -259,6 +276,7 @@
     position: relative;
   }
   
+  /* 轮播图内部元素 */
   .bili-carousel {
     display: block;
     width: 100%;
@@ -267,13 +285,11 @@
     cursor: pointer;
     background: #f1f2f3;
   }
-  
   .bili-cover-img {
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
-  
   .bili-carousel-mask {
     position: absolute;
     bottom: 0; left: 0; right: 0;
@@ -281,15 +297,11 @@
     background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
     pointer-events: none;
   }
-  
   .bili-carousel-info {
     position: absolute;
-    bottom: 12px;
-    left: 12px;
-    right: 12px;
+    bottom: 12px; left: 12px; right: 12px;
     color: #fff;
   }
-  
   .bili-carousel-title {
     font-size: 18px;
     font-weight: 700;
@@ -297,13 +309,14 @@
     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
   }
   
+  /* 轮播图圆点 */
   .bili-dots {
     position: absolute;
     bottom: 12px;
     right: 16px;
     display: flex;
     gap: 6px;
-    pointer-events: auto; 
+    pointer-events: auto;
   }
   .dot {
     width: 8px; height: 8px;
@@ -317,6 +330,7 @@
     transform: scale(1.2);
   }
   
+  /* 轮播图箭头 */
   .bili-arrows button {
     position: absolute;
     top: 50%;
@@ -336,95 +350,23 @@
   .bili-arrows button:first-child { left: 8px; }
   .bili-arrows button:last-child { right: 8px; }
   
-  /* 右侧 Grid */
+  /* 右侧 6 宫格网格 */
   .bili-grid {
     flex: 1;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr); /* 3列 */
+    grid-template-rows: repeat(2, 1fr);    /* 2行 */
     gap: 12px;
   }
   
-  /* 卡片通用 */
-  .bili-card {
-    display: flex;
-    flex-direction: column;
-    text-decoration: none;
-    color: inherit;
+  /* 下方板块 单行 Grid (一行5个) */
+  .home-board {
+    margin-bottom: 30px;
   }
-  
-  .bili-card-cover {
-    position: relative;
-    width: 100%;
-    height: 0;
-    padding-bottom: 62.5%; /* 16:10 */
-    background: #f1f2f3;
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  
-  .bili-card-cover img {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    object-fit: cover;
-  }
-  
-  .bili-stats {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    padding: 30px 8px 6px;
-    background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
-    color: #fff;
-    font-size: 11px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-  }
-  
-  .stat-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  
-  .bili-card-info {
-    margin-top: 8px;
-  }
-  
-  .bili-title {
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-    color: #18191c;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    transition: color 0.2s;
-  }
-  .bili-card:hover .bili-title {
-    color: #00aeec;
-  }
-  
-  .bili-author {
-    font-size: 12px;
-    color: #9499a0;
-    margin-top: 4px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  
-  .up-icon {
-    border: 1px solid #9499a0;
-    border-radius: 3px;
-    padding: 0 2px;
-    font-size: 10px;
-    line-height: 12px;
-    transform: scale(0.9);
-    margin-right: 2px; /* 微调间距 */
+  .bili-row-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr); 
+    gap: 12px;
   }
   
   /* 移动端适配 */
@@ -439,11 +381,13 @@
       padding-bottom: 56.25%; /* 16:9 */
     }
     .bili-carousel {
-      position: absolute; 
-      inset: 0;
+      position: absolute; inset: 0;
     }
     .bili-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, 1fr); /* 手机端2列 */
+    }
+    .bili-row-grid {
+      grid-template-columns: repeat(2, 1fr); /* 手机端板块内容也变2列 */
     }
   }
   </style>
