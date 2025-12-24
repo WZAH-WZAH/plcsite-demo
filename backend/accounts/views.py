@@ -189,6 +189,7 @@ class MeUsernameView(APIView):
 
     def post(self, request):
         user = request.user
+        username_before = (getattr(user, 'username', '') or '')
         username = str(request.data.get('username') or '').strip().lower()
         if not username:
             return Response({'username': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
@@ -229,7 +230,14 @@ class MeUsernameView(APIView):
             target_type='user',
             target_id=str(user.id),
             request=request,
-            metadata={'cost': cost, 'username': username},
+            metadata={
+                'cost': cost,
+                # Backward compatible
+                'username': username,
+                # New fields for admin audit UI
+                'username_before': username_before,
+                'username_after': username,
+            },
         )
 
         return Response(

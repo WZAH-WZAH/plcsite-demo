@@ -4,6 +4,7 @@ import { api } from '../api'
 
 const logs = ref([])
 const error = ref('')
+const actor = ref('')
 const q = ref('')
 
 const filteredLogs = computed(() => {
@@ -40,7 +41,10 @@ function fmtMeta(meta) {
 async function load() {
   error.value = ''
   try {
-    const { data } = await api.get('/api/admin/audit/')
+    const params = {}
+    const a = actor.value.trim()
+    if (a) params.actor = a
+    const { data } = await api.get('/api/admin/audit/', { params })
     logs.value = data
   } catch (e) {
     error.value = '加载审计日志失败。'
@@ -58,7 +62,8 @@ onMounted(load)
         <RouterLink class="btn" to="/admin">返回</RouterLink>
       </div>
       <div class="row" style="margin-top: 10px">
-        <input v-model="q" placeholder="搜索 action / actor / target / ip" style="max-width: 420px" />
+        <input v-model="actor" placeholder="按用户名或UID筛选（@xxx 或数字）" style="max-width: 320px" />
+        <input v-model="q" placeholder="本页搜索（action / target / ip 等）" style="max-width: 320px" />
         <button class="btn" @click="load">刷新</button>
       </div>
     </div>
@@ -78,6 +83,14 @@ onMounted(load)
               <template v-if="l.actor_id"> · #{{ l.actor_id }}</template>
               · ip={{ l.ip || '-' }}
             </div>
+
+            <div
+              v-if="l.action === 'user.username.update' && l.metadata && (l.metadata.username_before || l.metadata.username_after)"
+              class="muted"
+            >
+              用户名：{{ l.metadata.username_before || '-' }} → {{ l.metadata.username_after || '-' }}
+            </div>
+
             <div class="muted" v-if="l.target_type">target={{ l.target_type }}#{{ l.target_id }}</div>
           </div>
           <pre class="muted" style="max-width: 420px; overflow: auto; margin: 0; white-space: pre-wrap">

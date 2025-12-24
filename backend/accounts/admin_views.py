@@ -11,6 +11,7 @@ from .models import AuditLog
 from .permissions import IsAdmin
 from .serializers import AdminUserSerializer
 from .models import StaffBoardPermission
+from forum.models import Board
 
 User = get_user_model()
 
@@ -88,7 +89,38 @@ class AdminAuditLogListView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        qs = AuditLog.objects.select_related('actor').order_by('-created_at')[:200]
+        qs = AuditLog.objects.select_related('actor').order_by('-created_at')
+
+        # Server-side filtering (so the UI can fetch fewer rows).
+        # Supported:
+        # - actor: username (with or without leading '@') OR numeric user id
+        # - actor_username: username (with or without leading '@')
+        # - actor_id: numeric user id
+        # - q: alias of actor
+        actor_raw = (request.query_params.get('actor') or request.query_params.get('q') or '').strip()
+        actor_username_raw = (request.query_params.get('actor_username') or '').strip()
+        actor_id_raw = (request.query_params.get('actor_id') or '').strip()
+
+        if actor_id_raw:
+            try:
+                qs = qs.filter(actor_id=int(actor_id_raw))
+            except (TypeError, ValueError):
+                qs = qs.none()
+        elif actor_username_raw:
+            u = actor_username_raw
+            if u and not u.startswith('@'):
+                u = '@' + u
+            qs = qs.filter(actor__username__iexact=u)
+        elif actor_raw:
+            if actor_raw.isdigit():
+                qs = qs.filter(actor_id=int(actor_raw))
+            else:
+                u = actor_raw
+                if u and not u.startswith('@'):
+                    u = '@' + u
+                qs = qs.filter(actor__username__iexact=u)
+
+        qs = qs[:200]
         data = [
             {
                 'id': log.id,
@@ -174,22 +206,25 @@ class AdminUserBoardPermsView(APIView):
         except User.DoesNotExist:
             return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        perms = (
+        boards = list(Board.objects.order_by('id'))
+        perms_qs = (
             StaffBoardPermission.objects.filter(user=target)
             .select_related('board')
             .order_by('board_id')
         )
+        perms_by_board_id = {int(p.board_id): p for p in perms_qs}
         data = {
             'staff_board_scoped': bool(getattr(target, 'staff_board_scoped', False)),
             'permissions': [
                 {
-                    'board_id': p.board_id,
-                    'board_slug': getattr(p.board, 'slug', ''),
-                    'board_title': getattr(p.board, 'title', ''),
-                    'can_moderate': bool(p.can_moderate),
-                    'can_delete': bool(p.can_delete),
+                    'board_id': b.id,
+                    # Frontend expects these keys.
+                    'slug': getattr(b, 'slug', ''),
+                    'title': getattr(b, 'title', ''),
+                    'can_moderate': bool(getattr(perms_by_board_id.get(int(b.id)), 'can_moderate', False)),
+                    'can_delete': bool(getattr(perms_by_board_id.get(int(b.id)), 'can_delete', False)),
                 }
-                for p in perms
+                for b in boards
             ],
         }
         return Response(data)
@@ -222,6 +257,14 @@ class AdminUserBoardPermsView(APIView):
                     'can_delete': bool(raw.get('can_delete', False)),
                 }
             )
+
+        # Only persist rows that actually grant something, and ignore unknown boards.
+        valid_ids = set(Board.objects.filter(id__in=[c['board_id'] for c in cleaned]).values_list('id', flat=True))
+        cleaned = [
+            c
+            for c in cleaned
+            if (c['board_id'] in valid_ids) and (c['can_moderate'] or c['can_delete'])
+        ]
 
         # Persist
         from django.db import transaction

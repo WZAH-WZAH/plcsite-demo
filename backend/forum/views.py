@@ -849,6 +849,121 @@ class PostViewSet(viewsets.ModelViewSet):
         )
         return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['get'], url_path='moderation/pending', permission_classes=[IsModerator])
+    def pending(self, request):
+        qs = Post.objects.select_related('board', 'author').filter(status=Post.Status.PENDING).order_by('-created_at')
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            allowed = staff_allowed_board_ids(request.user, for_action='moderate')
+            qs = qs.filter(board_id__in=allowed)
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='approve', permission_classes=[IsModerator])
+    def approve(self, request, pk=None):
+        post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
+        post.status = Post.Status.PUBLISHED
+        post.reviewed_by = request.user
+        post.reviewed_at = timezone.now()
+        post.reject_reason = ''
+        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
+        write_audit_log(
+            actor=request.user,
+            action='post.approve',
+            target_type='post',
+            target_id=str(post.id),
+            request=request,
+        )
+        return Response(self.get_serializer(post).data)
+
+    @action(detail=True, methods=['post'], url_path='reject', permission_classes=[IsModerator])
+    def reject(self, request, pk=None):
+        post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
+        reason = (request.data.get('reason') or '')[:200]
+        post.status = Post.Status.REJECTED
+        post.reviewed_by = request.user
+        post.reviewed_at = timezone.now()
+        post.reject_reason = reason
+        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
+        write_audit_log(
+            actor=request.user,
+            action='post.reject',
+            target_type='post',
+            target_id=str(post.id),
+            request=request,
+            metadata={'reason': reason},
+        )
+        return Response(self.get_serializer(post).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='revisions', permission_classes=[IsModerator])
+    def revisions(self, request, pk=None):
+        post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
+        qs = PostRevision.objects.select_related('editor').filter(post=post).order_by('sequence')
+        data = [
+            {
+                'id': r.id,
+                'sequence': r.sequence,
+                'editor_username': (r.editor.username if r.editor else ''),
+                'created_at': r.created_at,
+            }
+            for r in qs
+        ]
+        return Response(PostRevisionSerializer(data, many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='revisions/(?P<rev_id>[^/.]+)/diff', permission_classes=[IsModerator])
+    def revision_diff(self, request, pk=None, rev_id=None):
+        post = self.get_object()
+        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
+            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+                raise PermissionDenied('Not allowed for this board.')
+        try:
+            rev = PostRevision.objects.get(post=post, id=rev_id)
+        except PostRevision.DoesNotExist:
+            return Response({'detail': 'Revision not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        prev = (
+            PostRevision.objects.filter(post=post, sequence__lt=rev.sequence)
+            .order_by('-sequence')
+            .first()
+        )
+
+        def udiff(a: str, b: str, from_name: str, to_name: str) -> str:
+            return ''.join(
+                difflib.unified_diff(
+                    (a or '').splitlines(keepends=True),
+                    (b or '').splitlines(keepends=True),
+                    fromfile=from_name,
+                    tofile=to_name,
+                    lineterm=''
+                )
+            )
+
+        title_diff = udiff(prev.title if prev else '', rev.title, 'title(prev)', f'title(rev {rev.sequence})')
+        body_diff = udiff(prev.body if prev else '', rev.body, 'body(prev)', f'body(rev {rev.sequence})')
+        cover_changed = (prev.cover_image_name if prev else '') != (rev.cover_image_name or '')
+
+        payload = {
+            'from_revision_id': prev.id if prev else None,
+            'to_revision_id': rev.id,
+            'title_diff': title_diff,
+            'body_diff': body_diff,
+            'cover_changed': cover_changed,
+        }
+        out = PostRevisionDiffSerializer(payload).data
+        # Backward-compatible convenience field for clients that expect a single diff string.
+        out['diff'] = (title_diff or '') + ('\n' if (title_diff and body_diff) else '') + (body_diff or '')
+        return Response(out)
+
     def _create_revision(self, *, post: Post, editor) -> None:
         # Sequence monotonic per post
         with transaction.atomic():
@@ -910,115 +1025,3 @@ class CommentViewSet(viewsets.ModelViewSet):
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @action(detail=True, methods=['get'], url_path='revisions', permission_classes=[IsModerator])
-    def revisions(self, request, pk=None):
-        post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
-        qs = PostRevision.objects.select_related('editor').filter(post=post).order_by('sequence')
-        data = [
-            {
-                'id': r.id,
-                'sequence': r.sequence,
-                'editor_username': (r.editor.username if r.editor else ''),
-                'created_at': r.created_at,
-            }
-            for r in qs
-        ]
-        return Response(PostRevisionSerializer(data, many=True).data)
-
-    @action(detail=True, methods=['get'], url_path='revisions/(?P<rev_id>[^/.]+)/diff', permission_classes=[IsModerator])
-    def revision_diff(self, request, pk=None, rev_id=None):
-        post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
-        try:
-            rev = PostRevision.objects.get(post=post, id=rev_id)
-        except PostRevision.DoesNotExist:
-            return Response({'detail': 'Revision not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        prev = (
-            PostRevision.objects.filter(post=post, sequence__lt=rev.sequence)
-            .order_by('-sequence')
-            .first()
-        )
-
-        def udiff(a: str, b: str, from_name: str, to_name: str) -> str:
-            return ''.join(
-                difflib.unified_diff(
-                    (a or '').splitlines(keepends=True),
-                    (b or '').splitlines(keepends=True),
-                    fromfile=from_name,
-                    tofile=to_name,
-                    lineterm=''
-                )
-            )
-
-        title_diff = udiff(prev.title if prev else '', rev.title, 'title(prev)', f'title(rev {rev.sequence})')
-        body_diff = udiff(prev.body if prev else '', rev.body, 'body(prev)', f'body(rev {rev.sequence})')
-        cover_changed = (prev.cover_image_name if prev else '') != (rev.cover_image_name or '')
-
-        payload = {
-            'from_revision_id': prev.id if prev else None,
-            'to_revision_id': rev.id,
-            'title_diff': title_diff,
-            'body_diff': body_diff,
-            'cover_changed': cover_changed,
-        }
-        return Response(PostRevisionDiffSerializer(payload).data)
-
-    @action(detail=False, methods=['get'], url_path='moderation/pending', permission_classes=[IsModerator])
-    def pending(self, request):
-        qs = Post.objects.select_related('board', 'author').filter(status=Post.Status.PENDING).order_by('-created_at')
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            allowed = staff_allowed_board_ids(request.user, for_action='moderate')
-            qs = qs.filter(board_id__in=allowed)
-        page = self.paginate_queryset(qs)
-        if page is not None:
-            return self.get_paginated_response(self.get_serializer(page, many=True).data)
-        return Response(self.get_serializer(qs, many=True).data)
-
-    @action(detail=True, methods=['post'], url_path='approve', permission_classes=[IsModerator])
-    def approve(self, request, pk=None):
-        post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
-        post.status = Post.Status.PUBLISHED
-        post.reviewed_by = request.user
-        post.reviewed_at = timezone.now()
-        post.reject_reason = ''
-        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
-        write_audit_log(
-            actor=request.user,
-            action='post.approve',
-            target_type='post',
-            target_id=str(post.id),
-            request=request,
-        )
-        return Response(self.get_serializer(post).data)
-
-    @action(detail=True, methods=['post'], url_path='reject', permission_classes=[IsModerator])
-    def reject(self, request, pk=None):
-        post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
-        reason = (request.data.get('reason') or '')[:200]
-        post.status = Post.Status.REJECTED
-        post.reviewed_by = request.user
-        post.reviewed_at = timezone.now()
-        post.reject_reason = reason
-        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
-        write_audit_log(
-            actor=request.user,
-            action='post.reject',
-            target_type='post',
-            target_id=str(post.id),
-            request=request,
-            metadata={'reason': reason},
-        )
-        return Response(self.get_serializer(post).data, status=status.HTTP_200_OK)
