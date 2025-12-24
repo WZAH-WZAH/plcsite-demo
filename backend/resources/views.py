@@ -9,7 +9,7 @@ from rest_framework.response import Response
 
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
-from accounts.services import staff_allowed_board_ids, staff_can_delete_board, staff_can_moderate_board, try_consume_download_quota
+from accounts.services import require_secondary_verified, staff_allowed_board_ids, staff_can_delete_board, staff_can_moderate_board, try_consume_download_quota
 
 from .models import DownloadEvent, ResourceEntry, ResourceLink
 from .permissions import IsResourceOwnerOrStaff, IsResourceOwnerOrStaffOrReadOnly
@@ -37,13 +37,16 @@ class ResourceEntryViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
+        if getattr(user, 'is_currently_muted', False):
+            raise PermissionDenied('User is muted.')
         status_value = ResourceEntry.Status.PUBLISHED if user.is_staff else ResourceEntry.Status.PENDING
         serializer.save(created_by=user, status=status_value)
 
     def destroy(self, request, *args, **kwargs):
+        require_secondary_verified(request.user)
         obj = self.get_object()
         user = request.user
-        if user and user.is_authenticated and getattr(user, 'is_staff', False) and getattr(user, 'staff_board_scoped', False) and (not getattr(user, 'is_superuser', False)):
+        if user and user.is_authenticated and getattr(user, 'is_staff', False) and (not getattr(user, 'is_superuser', False)):
             is_owner = getattr(obj, 'created_by_id', None) == getattr(user, 'id', None)
             if not is_owner:
                 board_id = getattr(getattr(obj, 'post', None), 'board_id', None)
@@ -97,58 +100,15 @@ class ResourceEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='moderation/pending', permission_classes=[IsModerator])
     def pending(self, request):
-        qs = ResourceEntry.objects.select_related('post', 'post__board', 'post__author').filter(status=ResourceEntry.Status.PENDING).order_by('-created_at')
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            allowed = staff_allowed_board_ids(request.user, for_action='moderate')
-            qs = qs.filter(post__board_id__in=allowed)
-        page = self.paginate_queryset(qs)
-        if page is not None:
-            return self.get_paginated_response(self.get_serializer(page, many=True).data)
-        return Response(self.get_serializer(qs, many=True).data)
+        return Response({'detail': 'Resource moderation is disabled.'}, status=status.HTTP_410_GONE)
 
     @action(detail=True, methods=['post'], url_path='approve', permission_classes=[IsModerator])
     def approve(self, request, pk=None):
-        resource = self.get_object()
-        board_id = getattr(getattr(resource, 'post', None), 'board_id', None)
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, board_id):
-                raise PermissionDenied('Not allowed for this board.')
-        resource.status = ResourceEntry.Status.PUBLISHED
-        resource.reviewed_by = request.user
-        resource.reviewed_at = timezone.now()
-        resource.reject_reason = ''
-        resource.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
-        write_audit_log(
-            actor=request.user,
-            action='resource.approve',
-            target_type='resource',
-            target_id=str(resource.id),
-            request=request,
-        )
-        return Response(self.get_serializer(resource).data)
+        return Response({'detail': 'Resource moderation is disabled.'}, status=status.HTTP_410_GONE)
 
     @action(detail=True, methods=['post'], url_path='reject', permission_classes=[IsModerator])
     def reject(self, request, pk=None):
-        resource = self.get_object()
-        board_id = getattr(getattr(resource, 'post', None), 'board_id', None)
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, board_id):
-                raise PermissionDenied('Not allowed for this board.')
-        reason = (request.data.get('reason') or '')[:200]
-        resource.status = ResourceEntry.Status.REJECTED
-        resource.reviewed_by = request.user
-        resource.reviewed_at = timezone.now()
-        resource.reject_reason = reason
-        resource.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
-        write_audit_log(
-            actor=request.user,
-            action='resource.reject',
-            target_type='resource',
-            target_id=str(resource.id),
-            request=request,
-            metadata={'reason': reason},
-        )
-        return Response(self.get_serializer(resource).data)
+        return Response({'detail': 'Resource moderation is disabled.'}, status=status.HTTP_410_GONE)
 
 
 class ResourceLinkViewSet(viewsets.ModelViewSet):
@@ -174,9 +134,10 @@ class ResourceLinkViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
+        require_secondary_verified(request.user)
         obj = self.get_object()
         user = request.user
-        if user and user.is_authenticated and getattr(user, 'is_staff', False) and getattr(user, 'staff_board_scoped', False) and (not getattr(user, 'is_superuser', False)):
+        if user and user.is_authenticated and getattr(user, 'is_staff', False) and (not getattr(user, 'is_superuser', False)):
             resource = getattr(obj, 'resource', None)
             is_owner = getattr(resource, 'created_by_id', None) == getattr(user, 'id', None)
             if not is_owner:

@@ -8,6 +8,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.contrib.auth.hashers import check_password, make_password
 
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -265,6 +266,80 @@ class MePostsView(APIView):
             .prefetch_related('resource__links')
             .order_by('-created_at', '-id')
         )
+
+
+class MeSecondaryPasswordView(APIView):
+    """Set or change secondary password.
+
+    Requires primary password confirmation.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        current_password = str(request.data.get('current_password') or '')
+        secondary_password = str(request.data.get('secondary_password') or '')
+        secondary_password2 = str(request.data.get('secondary_password2') or '')
+
+        if not current_password:
+            return Response({'current_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if not user.check_password(current_password):
+            return Response({'current_password': ['密码错误。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not secondary_password:
+            return Response({'secondary_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if len(secondary_password) < 6:
+            return Response({'secondary_password': ['长度至少 6。']}, status=status.HTTP_400_BAD_REQUEST)
+        if len(secondary_password) > 64:
+            return Response({'secondary_password': ['长度不能超过 64。']}, status=status.HTTP_400_BAD_REQUEST)
+        if secondary_password != secondary_password2:
+            return Response({'secondary_password2': ['两次输入不一致。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.secondary_password_hash = make_password(secondary_password)
+        # Reset verification window; require a fresh verify.
+        user.secondary_verified_at = None
+        user.save(update_fields=['secondary_password_hash', 'secondary_verified_at'])
+
+        write_audit_log(
+            actor=user,
+            action='user.secondary_password.set',
+            target_type='user',
+            target_id=str(user.id),
+            request=request,
+        )
+
+        return Response({'has_secondary_password': True}, status=status.HTTP_200_OK)
+
+
+class MeSecondaryPasswordVerifyView(APIView):
+    """Verify secondary password and open a time-limited window for privileged actions."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        secondary_password = str(request.data.get('secondary_password') or '')
+        if not secondary_password:
+            return Response({'secondary_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        h = (getattr(user, 'secondary_password_hash', '') or '').strip()
+        if not h:
+            return Response({'detail': '未设置二级密码。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not check_password(secondary_password, h):
+            return Response({'secondary_password': ['二级密码错误。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.secondary_verified_at = timezone.now()
+        user.save(update_fields=['secondary_verified_at'])
+
+        write_audit_log(
+            actor=user,
+            action='user.secondary_password.verify',
+            target_type='user',
+            target_id=str(user.id),
+            request=request,
+        )
+
+        return Response({'ok': True}, status=status.HTTP_200_OK)
 
         paginator = PageNumberPagination()
         paginator.page_size = 20

@@ -22,7 +22,7 @@ from django_ratelimit.decorators import ratelimit
 
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
-from accounts.services import staff_allowed_board_ids, staff_can_moderate_board, staff_can_delete_board
+from accounts.services import require_secondary_verified, staff_allowed_board_ids, staff_can_moderate_board, staff_can_delete_board
 
 from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
 from .permissions import IsAuthorOrStaffOrReadOnly
@@ -32,6 +32,7 @@ from .serializers import (
     CommentCreateSerializer,
     CommentSerializer,
     HomeHeroSlideSerializer,
+    PostModerationSerializer,
     PostRevisionDiffSerializer,
     PostRevisionSerializer,
     PostSerializer,
@@ -126,6 +127,8 @@ class PostViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if getattr(request, 'limited', False):
             return Response({'detail': 'Too many requests.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        if getattr(request.user, 'is_currently_muted', False):
+            raise PermissionDenied('User is muted.')
         return super().create(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
@@ -147,6 +150,7 @@ class PostViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        qs = qs.filter(is_deleted=False)
         user = self.request.user
         if user.is_authenticated and user.is_staff:
             filtered = qs
@@ -375,9 +379,28 @@ class PostViewSet(viewsets.ModelViewSet):
         write_audit_log(actor=user, action='post.update', target_type='post', target_id=str(obj.id), request=self.request)
 
     def perform_destroy(self, instance):
+        require_secondary_verified(self.request.user)
         actor = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
-        write_audit_log(actor=actor, action='post.delete', target_type='post', target_id=str(instance.id), request=self.request)
-        return super().perform_destroy(instance)
+        if getattr(instance, 'is_deleted', False):
+            return
+        instance.is_deleted = True
+        instance.deleted_at = timezone.now()
+        instance.deleted_by = actor
+        instance.moderation_claimed_by = None
+        instance.moderation_claimed_at = None
+        instance.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'moderation_claimed_by', 'moderation_claimed_at', 'updated_at'])
+        write_audit_log(
+            actor=actor,
+            action='post.delete',
+            target_type='post',
+            target_id=str(instance.id),
+            request=self.request,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['get'], url_path='search', permission_classes=[permissions.AllowAny])
     def search(self, request):
@@ -785,6 +808,8 @@ class PostViewSet(viewsets.ModelViewSet):
         user = request.user
         if getattr(user, 'is_currently_banned', False):
             raise PermissionDenied('User is banned.')
+        if getattr(user, 'is_currently_muted', False):
+            raise PermissionDenied('User is muted.')
         if post.is_locked and not getattr(user, 'is_staff', False):
             raise PermissionDenied('Post is locked.')
         if post.status != Post.Status.PUBLISHED and not getattr(user, 'is_staff', False) and post.author_id != user.id:
@@ -851,26 +876,67 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='moderation/pending', permission_classes=[IsModerator])
     def pending(self, request):
-        qs = Post.objects.select_related('board', 'author').filter(status=Post.Status.PENDING).order_by('-created_at')
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            allowed = staff_allowed_board_ids(request.user, for_action='moderate')
-            qs = qs.filter(board_id__in=allowed)
+        require_secondary_verified(request.user)
+
+        mine = str(request.query_params.get('mine') or '1').strip().lower() in ('1', 'true', 'yes')
+        board_slug = (request.query_params.get('board_slug') or '').strip()
+        board_id = (request.query_params.get('board') or '').strip()
+
+        qs = (
+            Post.objects.select_related('board', 'author', 'moderation_claimed_by')
+            .filter(status=Post.Status.PENDING, is_deleted=False)
+            .order_by('-created_at')
+        )
+
+        if board_slug and board_slug.lower() != 'all':
+            qs = qs.filter(board__slug=board_slug)
+        elif board_id:
+            try:
+                qs = qs.filter(board_id=int(board_id))
+            except Exception:
+                pass
+
+        allowed_board_ids = None
+        if request.user and request.user.is_authenticated and (not getattr(request.user, 'is_superuser', False)):
+            allowed_board_ids = set(staff_allowed_board_ids(request.user, for_action='moderate'))
+            # Non-superuser staff should never see boards they cannot moderate.
+            qs = qs.filter(board_id__in=list(allowed_board_ids))
+
+        # "mine" means: only show items that are actionable for me (not claimed by others).
+        if mine:
+            qs = qs.filter(Q(moderation_claimed_by__isnull=True) | Q(moderation_claimed_by_id=request.user.id))
+
         page = self.paginate_queryset(qs)
+        items = page if page is not None else list(qs[:200])
+
+        ser = PostModerationSerializer(items, many=True, context={'request': request, 'allowed_board_ids': allowed_board_ids})
+        data = ser.data
+
         if page is not None:
-            return self.get_paginated_response(self.get_serializer(page, many=True).data)
-        return Response(self.get_serializer(qs, many=True).data)
+            return self.get_paginated_response(data)
+        return Response(data)
 
     @action(detail=True, methods=['post'], url_path='approve', permission_classes=[IsModerator])
     def approve(self, request, pk=None):
+        require_secondary_verified(request.user)
         post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
+        if getattr(post, 'is_deleted', False):
+            raise PermissionDenied('Post is deleted.')
+        if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+            raise PermissionDenied('Not allowed for this board.')
+
+        # Occupancy check
+        claimed_by_id = getattr(post, 'moderation_claimed_by_id', None)
+        if claimed_by_id and claimed_by_id != request.user.id and (not getattr(request.user, 'is_superuser', False)):
+            raise PermissionDenied('Post is being handled by someone else.')
+
         post.status = Post.Status.PUBLISHED
         post.reviewed_by = request.user
         post.reviewed_at = timezone.now()
         post.reject_reason = ''
-        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
+        post.moderation_claimed_by = None
+        post.moderation_claimed_at = None
+        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason', 'moderation_claimed_by', 'moderation_claimed_at'])
         write_audit_log(
             actor=request.user,
             action='post.approve',
@@ -882,16 +948,26 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='reject', permission_classes=[IsModerator])
     def reject(self, request, pk=None):
+        require_secondary_verified(request.user)
         post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
+        if getattr(post, 'is_deleted', False):
+            raise PermissionDenied('Post is deleted.')
+        if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+            raise PermissionDenied('Not allowed for this board.')
+
+        # Occupancy check
+        claimed_by_id = getattr(post, 'moderation_claimed_by_id', None)
+        if claimed_by_id and claimed_by_id != request.user.id and (not getattr(request.user, 'is_superuser', False)):
+            raise PermissionDenied('Post is being handled by someone else.')
+
         reason = (request.data.get('reason') or '')[:200]
         post.status = Post.Status.REJECTED
         post.reviewed_by = request.user
         post.reviewed_at = timezone.now()
         post.reject_reason = reason
-        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason'])
+        post.moderation_claimed_by = None
+        post.moderation_claimed_at = None
+        post.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'reject_reason', 'moderation_claimed_by', 'moderation_claimed_at'])
         write_audit_log(
             actor=request.user,
             action='post.reject',
@@ -902,12 +978,61 @@ class PostViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(post).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'], url_path='moderation/claim', permission_classes=[IsModerator])
+    def claim(self, request, pk=None):
+        require_secondary_verified(request.user)
+        post = self.get_object()
+        if getattr(post, 'is_deleted', False):
+            return Response({'detail': 'Post is deleted.'}, status=status.HTTP_400_BAD_REQUEST)
+        if post.status != Post.Status.PENDING:
+            return Response({'detail': 'Not pending.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+            raise PermissionDenied('Not allowed for this board.')
+
+        if post.moderation_claimed_by_id and post.moderation_claimed_by_id != request.user.id and (not getattr(request.user, 'is_superuser', False)):
+            return Response({'detail': 'Already claimed.'}, status=status.HTTP_409_CONFLICT)
+
+        post.moderation_claimed_by = request.user
+        post.moderation_claimed_at = timezone.now()
+        post.save(update_fields=['moderation_claimed_by', 'moderation_claimed_at'])
+
+        write_audit_log(
+            actor=request.user,
+            action='post.moderation.claim',
+            target_type='post',
+            target_id=str(post.id),
+            request=request,
+        )
+
+        return Response({'ok': True})
+
+    @action(detail=True, methods=['post'], url_path='moderation/unclaim', permission_classes=[IsModerator])
+    def unclaim(self, request, pk=None):
+        require_secondary_verified(request.user)
+        post = self.get_object()
+        if post.moderation_claimed_by_id and post.moderation_claimed_by_id != request.user.id and (not getattr(request.user, 'is_superuser', False)):
+            raise PermissionDenied('Not allowed.')
+
+        post.moderation_claimed_by = None
+        post.moderation_claimed_at = None
+        post.save(update_fields=['moderation_claimed_by', 'moderation_claimed_at'])
+
+        write_audit_log(
+            actor=request.user,
+            action='post.moderation.unclaim',
+            target_type='post',
+            target_id=str(post.id),
+            request=request,
+        )
+
+        return Response({'ok': True})
+
     @action(detail=True, methods=['get'], url_path='revisions', permission_classes=[IsModerator])
     def revisions(self, request, pk=None):
+        require_secondary_verified(request.user)
         post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
+        if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+            raise PermissionDenied('Not allowed for this board.')
         qs = PostRevision.objects.select_related('editor').filter(post=post).order_by('sequence')
         data = [
             {
@@ -922,10 +1047,10 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='revisions/(?P<rev_id>[^/.]+)/diff', permission_classes=[IsModerator])
     def revision_diff(self, request, pk=None, rev_id=None):
+        require_secondary_verified(request.user)
         post = self.get_object()
-        if getattr(request.user, 'staff_board_scoped', False) and (not getattr(request.user, 'is_superuser', False)):
-            if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
-                raise PermissionDenied('Not allowed for this board.')
+        if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
+            raise PermissionDenied('Not allowed for this board.')
         try:
             rev = PostRevision.objects.get(post=post, id=rev_id)
         except PostRevision.DoesNotExist:
@@ -997,6 +1122,7 @@ class CommentViewSet(viewsets.ModelViewSet):
         return qs.none()
 
     def destroy(self, request, *args, **kwargs):
+        require_secondary_verified(request.user)
         obj = self.get_object()
         user = request.user
         if not user or not user.is_authenticated:
@@ -1005,8 +1131,8 @@ class CommentViewSet(viewsets.ModelViewSet):
         if not (is_author or getattr(user, 'is_staff', False)):
             raise PermissionDenied('Not allowed.')
 
-        # Scoped staff can only delete comments within allowed boards.
-        if (not is_author) and getattr(user, 'is_staff', False) and getattr(user, 'staff_board_scoped', False) and (not getattr(user, 'is_superuser', False)):
+        # Staff can only delete comments within allowed boards.
+        if (not is_author) and getattr(user, 'is_staff', False) and (not getattr(user, 'is_superuser', False)):
             board_id = getattr(getattr(obj, 'post', None), 'board_id', None)
             if not staff_can_delete_board(user, board_id):
                 raise PermissionDenied('Not allowed for this board.')

@@ -25,6 +25,15 @@ class User(AbstractUser):
 	banned_until = models.DateTimeField(null=True, blank=True)
 	ban_reason = models.CharField(max_length=200, blank=True)
 
+	# Mute (can read but cannot post/comment/upload resources)
+	is_muted = models.BooleanField(default=False)
+	muted_until = models.DateTimeField(null=True, blank=True)
+	mute_reason = models.CharField(max_length=200, blank=True)
+
+	# Secondary password (2FA-like step-up for high-risk actions)
+	secondary_password_hash = models.CharField(max_length=200, blank=True, default='')
+	secondary_verified_at = models.DateTimeField(null=True, blank=True)
+
 	# Staff board permissions
 	# - When False: staff users keep legacy behavior (can moderate/delete across all boards).
 	# - When True: staff users can only moderate/delete boards explicitly granted.
@@ -54,6 +63,15 @@ class User(AbstractUser):
 	def is_currently_banned(self) -> bool:
 		until = self.banned_until
 		if self.is_banned:
+			return until is None or until > timezone.now()
+		if until is None:
+			return False
+		return until > timezone.now()
+
+	@property
+	def is_currently_muted(self) -> bool:
+		until = self.muted_until
+		if self.is_muted:
 			return until is None or until > timezone.now()
 		if until is None:
 			return False

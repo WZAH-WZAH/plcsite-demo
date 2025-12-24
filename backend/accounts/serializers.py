@@ -91,6 +91,11 @@ class MeSerializer(serializers.ModelSerializer):
     is_banned = serializers.BooleanField(read_only=True)
     banned_until = serializers.DateTimeField(read_only=True)
     ban_reason = serializers.CharField(read_only=True)
+    is_muted = serializers.BooleanField(read_only=True)
+    muted_until = serializers.DateTimeField(read_only=True)
+    mute_reason = serializers.CharField(read_only=True)
+    has_secondary_password = serializers.SerializerMethodField()
+    secondary_verified_recent = serializers.SerializerMethodField()
     is_staff = serializers.BooleanField(read_only=True)
     is_superuser = serializers.BooleanField(read_only=True)
 
@@ -125,9 +130,25 @@ class MeSerializer(serializers.ModelSerializer):
             'is_banned',
             'banned_until',
             'ban_reason',
+            'is_muted',
+            'muted_until',
+            'mute_reason',
+            'has_secondary_password',
+            'secondary_verified_recent',
             'is_staff',
             'is_superuser',
         )
+
+    def get_has_secondary_password(self, obj) -> bool:
+        return bool((getattr(obj, 'secondary_password_hash', '') or '').strip())
+
+    def get_secondary_verified_recent(self, obj) -> bool:
+        try:
+            from .services import user_secondary_verified_recent
+
+            return bool(user_secondary_verified_recent(obj))
+        except Exception:
+            return False
 
     def get_avatar_url(self, obj) -> str:
         # 备注：
@@ -211,6 +232,9 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'is_banned',
             'banned_until',
             'ban_reason',
+            'is_muted',
+            'muted_until',
+            'mute_reason',
             'date_joined',
             'last_login',
         )

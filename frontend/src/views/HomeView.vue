@@ -20,7 +20,7 @@
   const boardRows = ref([]) 
 
   // 首页不展示这些板块（后续再考虑在首页其它位置呈现）
-  const homeExcludedBoardSlugs = new Set(['announcements', 'feedback', 'site-log', 'blackroom'])
+  const homeExcludedBoardSlugs = new Set(['announcements', 'feedback', 'site-log', 'blackroom', 'board_a', 'board_b'])
   
   // --- 计算属性 ---
   const heroCarouselPosts = computed(() => (heroCarouselRaw.value || []).slice(0, HERO_CAROUSEL_COUNT))

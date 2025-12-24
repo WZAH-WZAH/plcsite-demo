@@ -1,14 +1,17 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api, unwrapList } from '../api'
+import { auth } from '../auth'
 
 const pendingPosts = ref([])
-const pendingResources = ref([])
+const boards = ref([])
 const loading = ref(false)
 const error = ref('')
 
+const mineOnly = ref(true)
+const boardSlug = ref('all')
+
 const postRejectReason = ref({})
-const resourceRejectReason = ref({})
 const busy = ref({})
 
 const revisionsByPostId = ref({})
@@ -17,22 +20,71 @@ const diffByPostId = ref({})
 const revBusy = ref({})
 
 const pendingPostCount = computed(() => pendingPosts.value.length)
-const pendingResourceCount = computed(() => pendingResources.value.length)
+
+const me = computed(() => auth.state.me)
+
+function isClaimedByMe(p) {
+  return Boolean(p?.claimed_by_id && me.value?.id && p.claimed_by_id === me.value.id)
+}
+
+function isClaimedByOther(p) {
+  return Boolean(p?.claimed_by_id && me.value?.id && p.claimed_by_id !== me.value.id)
+}
+
+function canActOnPost(p) {
+  if (me.value?.is_superuser) return true
+  if (!p?.can_moderate) return false
+  if (isClaimedByOther(p)) return false
+  return true
+}
+
+async function loadBoards() {
+  try {
+    const { data } = await api.get('/api/boards/')
+    boards.value = unwrapList(data).filter((b) => b?.is_active)
+  } catch {
+    boards.value = []
+  }
+}
 
 async function load() {
   error.value = ''
   loading.value = true
   try {
-    const [p, r] = await Promise.all([
-      api.get('/api/posts/moderation/pending/'),
-      api.get('/api/resources/moderation/pending/'),
-    ])
-    pendingPosts.value = unwrapList(p.data)
-    pendingResources.value = unwrapList(r.data)
+    const params = {
+      mine: mineOnly.value ? 1 : 0,
+    }
+    if (boardSlug.value && boardSlug.value !== 'all') params.board_slug = boardSlug.value
+    const { data } = await api.get('/api/posts/moderation/pending/', { params })
+    pendingPosts.value = unwrapList(data)
   } catch (e) {
     error.value = '加载审核队列失败。'
   } finally {
     loading.value = false
+  }
+}
+
+async function claimPost(id) {
+  busy.value[`claim:${id}`] = true
+  try {
+    await api.post(`/api/posts/${id}/moderation/claim/`)
+    await load()
+  } catch (e) {
+    error.value = e?.response?.data?.detail || '操作失败。'
+  } finally {
+    busy.value[`claim:${id}`] = false
+  }
+}
+
+async function unclaimPost(id) {
+  busy.value[`unclaim:${id}`] = true
+  try {
+    await api.post(`/api/posts/${id}/moderation/unclaim/`)
+    await load()
+  } catch (e) {
+    error.value = e?.response?.data?.detail || '操作失败。'
+  } finally {
+    busy.value[`unclaim:${id}`] = false
   }
 }
 
@@ -91,33 +143,13 @@ async function loadDiff(postId, revisionId) {
   }
 }
 
-async function approveResource(id) {
-  busy.value[`res:${id}`] = true
-  try {
-    await api.post(`/api/resources/${id}/approve/`)
-    await load()
-  } catch (e) {
-    error.value = e?.response?.data?.detail || '操作失败。'
-  } finally {
-    busy.value[`res:${id}`] = false
+onMounted(async () => {
+  if (auth.isAuthed() && !auth.state.me && !auth.state.loading) {
+    await auth.loadMe()
   }
-}
-
-async function rejectResource(id) {
-  busy.value[`res:${id}`] = true
-  try {
-    const reason = (resourceRejectReason.value[id] || '').trim()
-    await api.post(`/api/resources/${id}/reject/`, { reason })
-    resourceRejectReason.value[id] = ''
-    await load()
-  } catch (e) {
-    error.value = e?.response?.data?.detail || '操作失败。'
-  } finally {
-    busy.value[`res:${id}`] = false
-  }
-}
-
-onMounted(load)
+  await loadBoards()
+  await load()
+})
 </script>
 
 <template>
@@ -127,9 +159,24 @@ onMounted(load)
         <h2 style="margin: 0">审核队列</h2>
         <RouterLink class="btn" to="/admin">返回</RouterLink>
       </div>
-      <div class="muted" style="margin-top: 6px">
-        待审帖子 {{ pendingPostCount }} · 待审资源 {{ pendingResourceCount }}
+      <div class="row" style="margin-top: 10px; flex-wrap: wrap; gap: 10px">
+        <label class="row" style="gap: 6px">
+          <input v-model="mineOnly" type="checkbox" @change="load" />
+          <span class="muted">只显示你的待审核（默认勾选）</span>
+        </label>
+
+        <div class="row" style="gap: 8px">
+          <span class="muted">板块</span>
+          <select v-model="boardSlug" @change="load">
+            <option value="all">全部</option>
+            <option v-for="b in boards" :key="b.id" :value="b.slug">{{ b.title }}</option>
+          </select>
+        </div>
+
+        <button class="btn" :disabled="loading" @click="load">刷新</button>
       </div>
+
+      <div class="muted" style="margin-top: 6px">待审帖子 {{ pendingPostCount }}</div>
     </div>
 
     <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
@@ -137,7 +184,7 @@ onMounted(load)
     <div class="card stack">
       <div class="row" style="justify-content: space-between">
         <h3 style="margin: 0">待审帖子（{{ pendingPosts.length }}）</h3>
-        <button class="btn" :disabled="loading" @click="load">刷新</button>
+        <div class="muted" style="font-size: 12px">支持“占用”避免多人重复处理</div>
       </div>
       <div v-for="p in pendingPosts" :key="p.id" class="card">
         <div class="row" style="justify-content: space-between">
@@ -150,14 +197,47 @@ onMounted(load)
               · board={{ p.board_slug }} · 创建：{{ new Date(p.created_at).toLocaleString() }}
               <span v-if="p.updated_at"> · 最后编辑：{{ new Date(p.updated_at).toLocaleString() }}</span>
             </div>
+
+            <div class="muted" style="margin-top: 6px">
+              <span v-if="p.claimed_by_id">
+                占用中：{{ p.claimed_by_nickname || p.claimed_by_username || '未知' }}
+                <span v-if="p.claimed_by_pid"> · PID {{ p.claimed_by_pid }}</span>
+                <span v-if="isClaimedByMe(p)"> · （你）</span>
+              </span>
+              <span v-else>未占用</span>
+              <span v-if="!p.can_moderate && !me?.is_superuser"> · 你没有此板块审核权限</span>
+            </div>
+
             <div v-if="p.body" class="muted" style="margin-top: 6px">
               {{ String(p.body).slice(0, 120) }}<span v-if="String(p.body).length > 120">…</span>
             </div>
           </div>
           <div class="row">
             <RouterLink class="btn" :to="`/posts/${p.id}`">查看</RouterLink>
-            <button class="btn" :disabled="busy[`post:${p.id}`]" @click="approvePost(p.id)">通过</button>
-            <button class="btn" :disabled="busy[`post:${p.id}`]" @click="rejectPost(p.id)">拒绝</button>
+
+            <button
+              v-if="!p.claimed_by_id"
+              class="btn"
+              :disabled="busy[`claim:${p.id}`] || !p.can_moderate"
+              @click="claimPost(p.id)"
+            >
+              占用
+            </button>
+            <button
+              v-else
+              class="btn"
+              :disabled="busy[`unclaim:${p.id}`] || (!isClaimedByMe(p) && !me?.is_superuser)"
+              @click="unclaimPost(p.id)"
+            >
+              释放
+            </button>
+
+            <button class="btn" :disabled="busy[`post:${p.id}`] || !canActOnPost(p)" @click="approvePost(p.id)">
+              通过
+            </button>
+            <button class="btn" :disabled="busy[`post:${p.id}`] || !canActOnPost(p)" @click="rejectPost(p.id)">
+              拒绝
+            </button>
           </div>
         </div>
 
@@ -208,45 +288,6 @@ onMounted(load)
         </div>
       </div>
       <div v-if="pendingPosts.length === 0" class="muted">暂无</div>
-    </div>
-
-    <div class="card stack">
-      <h3 style="margin: 0">待审资源（{{ pendingResources.length }}）</h3>
-      <div v-for="r in pendingResources" :key="r.id" class="card">
-        <div class="row" style="justify-content: space-between">
-          <div>
-            <div style="font-weight: 700">{{ r.title }}</div>
-            <div class="muted">
-              by {{ r.created_by_nickname || r.created_by_username || '未知' }}
-              <span v-if="r.created_by_nickname && r.created_by_username"> · {{ r.created_by_username }}</span>
-              <span v-if="r.created_by_pid"> · PID {{ r.created_by_pid }}</span>
-              · {{ new Date(r.created_at).toLocaleString() }}
-            </div>
-            <div class="muted" style="margin-top: 6px">
-              关联帖子：
-              <RouterLink v-if="r.post" class="btn" style="padding: 4px 8px" :to="`/posts/${r.post}`">#{{ r.post }}</RouterLink>
-              <span v-else>-</span>
-              <span style="margin-left: 10px">链接：{{ r.links?.length || 0 }}</span>
-              <span v-if="r.links?.length" style="margin-left: 10px">
-                （{{ r.links.map((x) => x.link_type).join(' / ') }}）
-              </span>
-            </div>
-          </div>
-          <div class="row">
-            <button class="btn" :disabled="busy[`res:${r.id}`]" @click="approveResource(r.id)">通过</button>
-            <button class="btn" :disabled="busy[`res:${r.id}`]" @click="rejectResource(r.id)">拒绝</button>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top: 10px">
-          <input
-            v-model="resourceRejectReason[r.id]"
-            placeholder="拒绝原因（可选，最多200字）"
-            maxlength="200"
-          />
-        </div>
-      </div>
-      <div v-if="pendingResources.length === 0" class="muted">暂无</div>
     </div>
   </div>
 </template>

@@ -151,6 +151,102 @@ class PostSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class PostModerationSerializer(serializers.ModelSerializer):
+    author_username = serializers.CharField(source='author.username', read_only=True)
+    author_nickname = serializers.CharField(source='author.nickname', read_only=True)
+    author_pid = serializers.CharField(source='author.pid', read_only=True)
+    board_slug = serializers.CharField(source='board.slug', read_only=True)
+
+    claimed_by_username = serializers.SerializerMethodField(read_only=True)
+    claimed_by_nickname = serializers.SerializerMethodField(read_only=True)
+    claimed_by_pid = serializers.SerializerMethodField(read_only=True)
+    claimed_by_id = serializers.SerializerMethodField(read_only=True)
+    can_moderate = serializers.SerializerMethodField(read_only=True)
+
+    deleted_by_username = serializers.SerializerMethodField(read_only=True)
+    deleted_by_nickname = serializers.SerializerMethodField(read_only=True)
+    deleted_by_pid = serializers.SerializerMethodField(read_only=True)
+    deleted_by_id = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Post
+        fields = (
+            'id',
+            'title',
+            'body',
+            'status',
+            'reject_reason',
+            'board',
+            'board_slug',
+            'author',
+            'author_nickname',
+            'author_username',
+            'author_pid',
+            'created_at',
+            'updated_at',
+            'moderation_claimed_at',
+            'claimed_by_id',
+            'claimed_by_username',
+            'claimed_by_nickname',
+            'claimed_by_pid',
+            'can_moderate',
+            'is_deleted',
+            'deleted_at',
+            'deleted_by_id',
+            'deleted_by_username',
+            'deleted_by_nickname',
+            'deleted_by_pid',
+        )
+        read_only_fields = fields
+
+    def _claimed_by(self, obj):
+        return getattr(obj, 'moderation_claimed_by', None)
+
+    def get_claimed_by_username(self, obj) -> str | None:
+        u = self._claimed_by(obj)
+        return getattr(u, 'username', None) if u else None
+
+    def get_claimed_by_nickname(self, obj) -> str | None:
+        u = self._claimed_by(obj)
+        return getattr(u, 'nickname', None) if u else None
+
+    def get_claimed_by_pid(self, obj) -> str | None:
+        u = self._claimed_by(obj)
+        return getattr(u, 'pid', None) if u else None
+
+    def get_claimed_by_id(self, obj) -> int | None:
+        u = self._claimed_by(obj)
+        return getattr(u, 'id', None) if u else None
+
+    def get_can_moderate(self, obj) -> bool:
+        allowed = self.context.get('allowed_board_ids')
+        if allowed is None:
+            return True
+        try:
+            return int(getattr(obj, 'board_id', 0) or 0) in set(allowed)
+        except Exception:
+            return False
+
+    def _deleted_by(self, obj):
+        return getattr(obj, 'deleted_by', None)
+
+    def get_deleted_by_username(self, obj) -> str | None:
+        u = self._deleted_by(obj)
+        return getattr(u, 'username', None) if u else None
+
+    def get_deleted_by_nickname(self, obj) -> str | None:
+        u = self._deleted_by(obj)
+        return getattr(u, 'nickname', None) if u else None
+
+    def get_deleted_by_pid(self, obj) -> str | None:
+        u = self._deleted_by(obj)
+        return getattr(u, 'pid', None) if u else None
+
+    def get_deleted_by_id(self, obj) -> int | None:
+        u = self._deleted_by(obj)
+        return getattr(u, 'id', None) if u else None
+
+
 class CommentSerializer(serializers.ModelSerializer):
     author_username = serializers.CharField(source='author.username', read_only=True)
     author_nickname = serializers.CharField(source='author.nickname', read_only=True)

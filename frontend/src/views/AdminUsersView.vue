@@ -9,6 +9,12 @@ const q = ref('')
 const busy = ref({})
 const banDays = ref({})
 const banReason = ref({})
+const muteDays = ref({})
+const muteReason = ref({})
+
+const needSecondary = ref(false)
+const secondary = ref('')
+const secondaryBusy = ref(false)
 
 const permsOpenUserId = ref(null)
 const permsBusy = ref(false)
@@ -29,11 +35,33 @@ function userHaystack(u) {
 
 async function load() {
   error.value = ''
+  needSecondary.value = false
   try {
     const { data } = await api.get('/api/admin/users/')
     users.value = data
   } catch (e) {
-    error.value = '加载用户失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '加载用户失败。'
+    }
+  }
+}
+
+async function verifySecondary() {
+  secondaryBusy.value = true
+  error.value = ''
+  try {
+    await api.post('/api/me/secondary-password/verify/', { secondary_password: secondary.value })
+    secondary.value = ''
+    await auth.loadMe()
+    await load()
+  } catch (e) {
+    error.value = e?.response?.data?.detail || '二级密码验证失败。'
+  } finally {
+    secondaryBusy.value = false
   }
 }
 
@@ -50,7 +78,13 @@ async function ban(userId) {
     banReason.value[userId] = ''
     await load()
   } catch (e) {
-    error.value = e?.response?.data?.detail || '操作失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '操作失败。'
+    }
   } finally {
     busy.value[userId] = false
   }
@@ -63,7 +97,57 @@ async function unban(userId) {
     await api.post(`/api/admin/users/${userId}/unban/`)
     await load()
   } catch (e) {
-    error.value = e?.response?.data?.detail || '操作失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '操作失败。'
+    }
+  } finally {
+    busy.value[userId] = false
+  }
+}
+
+async function mute(userId) {
+  busy.value[userId] = true
+  error.value = ''
+  try {
+    const daysRaw = muteDays.value[userId]
+    const reason = (muteReason.value[userId] || '').trim()
+    const payload = { reason }
+    if (daysRaw !== undefined && String(daysRaw).trim() !== '') payload.days = Number(daysRaw)
+    await api.post(`/api/admin/users/${userId}/mute/`, payload)
+    muteDays.value[userId] = ''
+    muteReason.value[userId] = ''
+    await load()
+  } catch (e) {
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '操作失败。'
+    }
+  } finally {
+    busy.value[userId] = false
+  }
+}
+
+async function unmute(userId) {
+  busy.value[userId] = true
+  error.value = ''
+  try {
+    await api.post(`/api/admin/users/${userId}/unmute/`)
+    await load()
+  } catch (e) {
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '操作失败。'
+    }
   } finally {
     busy.value[userId] = false
   }
@@ -76,7 +160,13 @@ async function grantStaff(userId) {
     await api.post(`/api/admin/users/${userId}/grant-staff/`)
     await load()
   } catch (e) {
-    error.value = e?.response?.data?.detail || '操作失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '操作失败。'
+    }
   } finally {
     busy.value[userId] = false
   }
@@ -89,7 +179,13 @@ async function revokeStaff(userId) {
     await api.post(`/api/admin/users/${userId}/revoke-staff/`)
     await load()
   } catch (e) {
-    error.value = e?.response?.data?.detail || '操作失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+    } else {
+      error.value = detail || '操作失败。'
+    }
   } finally {
     busy.value[userId] = false
   }
@@ -111,7 +207,14 @@ async function toggleBoardPerms(u) {
     }
     perms.value.permissions.sort((a, b) => String(a?.title || '').localeCompare(String(b?.title || '')))
   } catch (e) {
-    permsError.value = e?.response?.data?.detail || '加载板块权限失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+      permsError.value = '需要二级密码验证。'
+    } else {
+      permsError.value = detail || '加载板块权限失败。'
+    }
   } finally {
     permsBusy.value = false
   }
@@ -134,7 +237,14 @@ async function saveBoardPerms() {
     await api.put(`/api/admin/users/${userId}/board-perms/`, payload)
     await load()
   } catch (e) {
-    permsError.value = e?.response?.data?.detail || '保存失败。'
+    const detail = e?.response?.data?.detail
+    if (detail === 'Secondary password required.') {
+      needSecondary.value = true
+      error.value = '需要二级密码验证。'
+      permsError.value = '需要二级密码验证。'
+    } else {
+      permsError.value = detail || '保存失败。'
+    }
   } finally {
     permsBusy.value = false
   }
@@ -156,9 +266,19 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
+    <div v-if="needSecondary" class="card stack" style="border-color: #fecaca; background: #fff1f2">
+      <div style="font-weight: 700">需要二级密码</div>
+      <div class="muted">验证后才能进入用户管理。</div>
+      <div class="row" style="gap: 10px">
+        <input v-model="secondary" type="password" placeholder="输入二级密码" style="max-width: 260px" />
+        <button class="btn" :disabled="secondaryBusy" @click="verifySecondary">验证</button>
+      </div>
+      <div v-if="error" class="muted">{{ error }}</div>
+    </div>
 
-    <div class="card stack">
+    <div v-else-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
+
+    <div v-if="!needSecondary" class="card stack">
       <div v-for="u in filteredUsers" :key="u.id" class="card stack" style="gap: 10px">
         <div class="row" style="justify-content: space-between">
           <div>
@@ -178,6 +298,11 @@ onMounted(load)
             <div class="muted" v-if="u.is_banned">
               已封禁：{{ u.ban_reason || '未填原因' }}
               <span v-if="u.banned_until"> · 至 {{ new Date(u.banned_until).toLocaleString() }}</span>
+              <span v-else> · 永久</span>
+            </div>
+            <div class="muted" v-if="u.is_muted">
+              已禁言：{{ u.mute_reason || '未填原因' }}
+              <span v-if="u.muted_until"> · 至 {{ new Date(u.muted_until).toLocaleString() }}</span>
               <span v-else> · 永久</span>
             </div>
           </div>
@@ -210,6 +335,9 @@ onMounted(load)
               </button>
             </template>
 
+            <button v-if="!u.is_muted" class="btn" :disabled="busy[u.id]" @click="mute(u.id)">禁言</button>
+            <button v-else class="btn" :disabled="busy[u.id]" @click="unmute(u.id)">解除禁言</button>
+
             <button v-if="!u.is_banned" class="btn" :disabled="busy[u.id]" @click="ban(u.id)">封禁</button>
             <button v-else class="btn" :disabled="busy[u.id]" @click="unban(u.id)">解封</button>
           </div>
@@ -223,6 +351,16 @@ onMounted(load)
             style="max-width: 180px"
           />
           <input v-model="banReason[u.id]" placeholder="原因（可选）" maxlength="200" />
+        </div>
+
+        <div v-if="!u.is_muted" class="row" style="gap: 10px">
+          <input
+            v-model="muteDays[u.id]"
+            placeholder="禁言天数（留空=永久）"
+            inputmode="numeric"
+            style="max-width: 180px"
+          />
+          <input v-model="muteReason[u.id]" placeholder="原因（可选）" maxlength="200" />
         </div>
 
         <div v-if="auth.state.me?.is_superuser && u.is_staff && !u.is_superuser && permsOpenUserId === u.id" class="card stack">

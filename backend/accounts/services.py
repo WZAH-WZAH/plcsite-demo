@@ -3,7 +3,39 @@ from __future__ import annotations
 from django.utils import timezone
 from django.db import transaction
 
+from datetime import timedelta
+
 from .models import DailyDownloadStat, DailyLoginStat, DailyPointStat, StaffBoardPermission, User
+
+
+SECONDARY_VERIFY_TTL_MINUTES = 20
+
+
+def user_has_secondary_password(user: User) -> bool:
+    return bool((getattr(user, 'secondary_password_hash', '') or '').strip())
+
+
+def user_secondary_verified_recent(user: User, *, ttl_minutes: int = SECONDARY_VERIFY_TTL_MINUTES) -> bool:
+    ts = getattr(user, 'secondary_verified_at', None)
+    if ts is None:
+        return False
+    try:
+        return ts >= (timezone.now() - timedelta(minutes=int(ttl_minutes)))
+    except Exception:
+        return False
+
+
+def require_secondary_verified(user: User) -> None:
+    """Raise PermissionDenied-compatible exception text by callers."""
+
+    from rest_framework.exceptions import PermissionDenied
+
+    if not user or not getattr(user, 'is_authenticated', False):
+        raise PermissionDenied('Authentication required.')
+    if not user_has_secondary_password(user):
+        raise PermissionDenied('Secondary password required.')
+    if not user_secondary_verified_recent(user):
+        raise PermissionDenied('Secondary password required.')
 
 
 def get_or_create_today_stat(user: User) -> DailyDownloadStat:
@@ -130,8 +162,6 @@ def staff_can_moderate_board(user: User, board_id: int | None) -> bool:
         return True
     if not getattr(user, 'is_staff', False):
         return False
-    if not getattr(user, 'staff_board_scoped', False):
-        return True
     return StaffBoardPermission.objects.filter(user=user, board_id=int(board_id), can_moderate=True).exists()
 
 
@@ -142,13 +172,11 @@ def staff_can_delete_board(user: User, board_id: int | None) -> bool:
         return True
     if not getattr(user, 'is_staff', False):
         return False
-    if not getattr(user, 'staff_board_scoped', False):
-        return True
     return StaffBoardPermission.objects.filter(user=user, board_id=int(board_id), can_delete=True).exists()
 
 
 def staff_allowed_board_ids(user: User, *, for_action: str) -> list[int]:
-    """Return allowed board IDs for a scoped staff user.
+    """Return allowed board IDs for a staff user.
 
     for_action: 'moderate' | 'delete'
     """
@@ -156,8 +184,6 @@ def staff_allowed_board_ids(user: User, *, for_action: str) -> list[int]:
     if getattr(user, 'is_superuser', False):
         return []
     if not getattr(user, 'is_staff', False):
-        return []
-    if not getattr(user, 'staff_board_scoped', False):
         return []
     field = 'can_moderate' if for_action == 'moderate' else 'can_delete'
     qs = StaffBoardPermission.objects.filter(user=user).filter(**{field: True}).values_list('board_id', flat=True)

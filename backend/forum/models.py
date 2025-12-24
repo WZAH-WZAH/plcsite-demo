@@ -42,6 +42,24 @@ class Post(models.Model):
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 	views_count = models.PositiveIntegerField(default=0)
+	# Moderation/archival
+	is_deleted = models.BooleanField(default=False)
+	deleted_at = models.DateTimeField(null=True, blank=True)
+	deleted_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		null=True,
+		blank=True,
+		on_delete=models.SET_NULL,
+		related_name='deleted_posts',
+	)
+	moderation_claimed_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		null=True,
+		blank=True,
+		on_delete=models.SET_NULL,
+		related_name='claimed_posts',
+	)
+	moderation_claimed_at = models.DateTimeField(null=True, blank=True)
 
 	class Meta:
 		ordering = ['-is_pinned', '-created_at']
@@ -50,6 +68,8 @@ class Post(models.Model):
 			models.Index(fields=['author', '-created_at']),
 			models.Index(fields=['status', '-created_at']),
 			models.Index(fields=['-views_count', 'id']),
+			models.Index(fields=['is_deleted', 'status', '-created_at'], name='post_deleted_status_idx'),
+			models.Index(fields=['moderation_claimed_by', 'moderation_claimed_at'], name='post_moderation_claim_idx'),
 		]
 
 	def __str__(self) -> str:
