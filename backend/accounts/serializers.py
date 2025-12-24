@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.cache import cache
+from django.core.validators import validate_email
 from rest_framework import serializers
 
 import re
@@ -21,10 +23,11 @@ def _reject_angle_brackets(s: str) -> str:
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     nickname = serializers.CharField(max_length=20, allow_blank=False, trim_whitespace=False)
+    email_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ('nickname', 'username', 'email', 'password')
+        fields = ('nickname', 'username', 'email', 'email_code', 'password')
 
     def validate_nickname(self, value: str) -> str:
         v = (value or '').strip()
@@ -53,7 +56,45 @@ class RegisterSerializer(serializers.ModelSerializer):
         validate_password(value)
         return value
 
+    def validate_email(self, value: str) -> str:
+        v = (value or '').strip()
+        if not v:
+            return ''
+        try:
+            validate_email(v)
+        except Exception:
+            raise serializers.ValidationError('邮箱格式不正确。')
+
+        # Required for email login to be unambiguous.
+        if User.objects.filter(email__iexact=v).exists():
+            raise serializers.ValidationError('该邮箱已被占用。')
+        return v
+
+    def validate(self, attrs):
+        email = (attrs.get('email') or '').strip()
+        code = (attrs.get('email_code') or '').strip()
+        self._email_code_verified = False
+
+        # Optional: only verify when both email and code are provided.
+        if code and (not email):
+            raise serializers.ValidationError({'email': ['请先填写邮箱。']})
+
+        if email and code:
+            key = f"email_code:register:{email.lower()}"
+            expected = cache.get(key)
+            if not expected:
+                raise serializers.ValidationError({'email_code': ['验证码已过期或不存在。']})
+            import secrets
+
+            if not secrets.compare_digest(str(expected), code):
+                raise serializers.ValidationError({'email_code': ['验证码错误。']})
+            cache.delete(key)
+            self._email_code_verified = True
+
+        return attrs
+
     def create(self, validated_data):
+        validated_data.pop('email_code', None)
         password = validated_data.pop('password')
         user = User(**validated_data)
         user.set_password(password)

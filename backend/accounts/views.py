@@ -10,6 +10,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.audit import write_audit_log
 
@@ -54,6 +55,32 @@ def _reject_angle_brackets(s: str) -> str:
 class CustomTokenObtainPairView(TokenObtainPairView):
     """JWT login that also records daily login stats."""
 
+    class Serializer(TokenObtainPairSerializer):
+        """Allow login with email / pid / username (handle) + password.
+
+        Client still posts { username, password } for backward compatibility.
+        """
+
+        def validate(self, attrs):
+            identifier = str(attrs.get('username') or '').strip()
+            password = attrs.get('password')
+
+            if identifier and password:
+                u = None
+                if identifier.startswith('@'):
+                    u = User.objects.filter(username__iexact=identifier.lower()).first()
+                elif identifier.isdigit() and len(identifier) == 8:
+                    u = User.objects.filter(pid=identifier).first()
+                elif '@' in identifier:
+                    u = User.objects.filter(email__iexact=identifier).first()
+
+                if u is not None:
+                    attrs['username'] = u.username
+
+            return super().validate(attrs)
+
+    serializer_class = Serializer
+
     @method_decorator(ratelimit(key='ip', rate='30/m', block=True))
     def post(self, request, *args, **kwargs):
         resp = super().post(request, *args, **kwargs)
@@ -85,10 +112,110 @@ class RegisterView(APIView):
                 user.save(update_fields=['pid'])
         except Exception:
             pass
+
+        # Optional email verification marker (best-effort audit only).
+        try:
+            if bool(getattr(serializer, '_email_code_verified', False)):
+                write_audit_log(
+                    actor=user,
+                    action='user.email.verify.register',
+                    target_type='user',
+                    target_id=str(user.id),
+                    request=request,
+                    metadata={'email': getattr(user, 'email', '')},
+                )
+        except Exception:
+            pass
+
         return Response(
             {'id': user.id, 'pid': getattr(user, 'pid', ''), 'nickname': getattr(user, 'nickname', ''), 'username': user.username},
             status=status.HTTP_201_CREATED,
         )
+
+
+def _email_code_cache_key(email: str, *, purpose: str) -> str:
+    e = (email or '').strip().lower()
+    p = (purpose or 'generic').strip().lower()[:32] or 'generic'
+    return f"email_code:{p}:{e}"
+
+
+class AuthEmailVerifyCodeSendView(APIView):
+    """Send email verification code for unauth flows (e.g., registration).
+
+    In DEBUG, if email sending is not configured, returns the code for dev use.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @method_decorator(ratelimit(key='ip', rate='10/m', block=True))
+    def post(self, request):
+        email = str(request.data.get('email') or '').strip()
+        purpose = str(request.data.get('purpose') or 'register').strip()[:32] or 'register'
+
+        if not email:
+            return Response({'email': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            from django.core.validators import validate_email
+
+            validate_email(email)
+        except Exception:
+            return Response({'email': ['邮箱格式不正确。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        import secrets
+
+        code = str(secrets.randbelow(1_000_000)).zfill(6)
+        ttl_seconds = 10 * 60
+        cache.set(_email_code_cache_key(email, purpose=purpose), code, timeout=ttl_seconds)
+
+        sent = False
+        try:
+            from django.core.mail import send_mail
+
+            subject = '验证码'
+            message = f"你的验证码是：{code}（10分钟内有效）"
+            from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or getattr(settings, 'SERVER_EMAIL', None) or ''
+            send_mail(subject, message, from_email, [email], fail_silently=False)
+            sent = True
+        except Exception:
+            sent = False
+
+        if sent:
+            return Response({'ok': True}, status=status.HTTP_200_OK)
+
+        if getattr(settings, 'DEBUG', False):
+            return Response({'ok': True, 'dev_code': code}, status=status.HTTP_200_OK)
+
+        return Response({'detail': 'Email sending is not configured.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class AuthEmailVerifyCodeVerifyView(APIView):
+    """Verify an email code previously sent (unauth flows)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    @method_decorator(ratelimit(key='ip', rate='30/m', block=True))
+    def post(self, request):
+        email = str(request.data.get('email') or '').strip()
+        code = str(request.data.get('code') or '').strip()
+        purpose = str(request.data.get('purpose') or 'register').strip()[:32] or 'register'
+
+        if not email:
+            return Response({'email': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if not code:
+            return Response({'code': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = _email_code_cache_key(email, purpose=purpose)
+        expected = cache.get(key)
+        if not expected:
+            return Response({'detail': '验证码已过期或不存在。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        import secrets
+
+        if not secrets.compare_digest(str(expected), code):
+            return Response({'code': ['验证码错误。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        cache.delete(key)
+        return Response({'ok': True}, status=status.HTTP_200_OK)
 
 
 class MeView(APIView):
@@ -302,13 +429,6 @@ class MePasswordChangeView(APIView):
         )
 
         return Response({'ok': True}, status=status.HTTP_200_OK)
-
-
-def _email_code_cache_key(email: str, *, purpose: str) -> str:
-    e = (email or '').strip().lower()
-    return f"email_code:{purpose}:{e}"
-
-
 class MeEmailVerifyCodeSendView(APIView):
     """Reserve API: send a verification code to an email.
 

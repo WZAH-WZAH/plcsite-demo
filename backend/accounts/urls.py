@@ -15,6 +15,8 @@ from .admin_views import (
     AdminUserListView,
 )
 from .views import (
+    AuthEmailVerifyCodeSendView,
+    AuthEmailVerifyCodeVerifyView,
     CustomTokenObtainPairView,
     MeEmailVerifyCodeSendView,
     MeEmailVerifyCodeVerifyView,
@@ -34,6 +36,8 @@ from .views import (
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='auth-register'),
+    path('auth/email/verify-code/send/', AuthEmailVerifyCodeSendView.as_view(), name='auth-email-verify-code-send'),
+    path('auth/email/verify-code/verify/', AuthEmailVerifyCodeVerifyView.as_view(), name='auth-email-verify-code-verify'),
     path('auth/password/check/', PasswordCheckView.as_view(), name='auth-password-check'),
     path('auth/token/', CustomTokenObtainPairView.as_view(), name='auth-token'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='auth-token-refresh'),

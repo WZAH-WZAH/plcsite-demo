@@ -9,6 +9,9 @@ const router = useRouter()
 const nickname = ref('')
 const username = ref('')
 const email = ref('')
+const emailCode = ref('')
+const emailCodeBusy = ref(false)
+const emailCodeHint = ref('')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
@@ -129,7 +132,9 @@ function formatRegisterError(e) {
     nickname: '昵称',
     username: '用户名',
     email: '邮箱',
+    email_code: '邮箱验证码',
     password: '密码',
+    emailCode: '邮箱验证码',
   }
 
   const parts = []
@@ -140,6 +145,29 @@ function formatRegisterError(e) {
     else parts.push(`${label}：${translate(value)}`)
   }
   return parts.join('\n') || '注册失败。'
+}
+
+async function sendEmailCode() {
+  error.value = ''
+  emailCodeHint.value = ''
+  const e = (email.value || '').trim()
+  if (!e) {
+    error.value = '请先填写邮箱。'
+    return
+  }
+  emailCodeBusy.value = true
+  try {
+    const { data } = await api.post('/api/auth/email/verify-code/send/', { email: e, purpose: 'register' })
+    if (data?.dev_code) {
+      emailCodeHint.value = `已发送（DEBUG）：${data.dev_code}`
+    } else {
+      emailCodeHint.value = '验证码已发送（若未收到请检查垃圾箱）。'
+    }
+  } catch (e) {
+    error.value = e?.response?.data?.detail || formatRegisterError(e) || '发送验证码失败。'
+  } finally {
+    emailCodeBusy.value = false
+  }
 }
 
 async function submit() {
@@ -162,6 +190,7 @@ async function submit() {
       nickname: nickname.value.trim(),
       username: uname,
       email: email.value.trim(),
+      email_code: (emailCode.value || '').trim(),
       password: password.value,
     })
     await router.push('/')
@@ -192,6 +221,17 @@ async function submit() {
         <div>邮箱（可选）</div>
         <input v-model="email" type="email" autocomplete="email" />
       </label>
+
+      <div v-if="email.trim()" class="row" style="gap: 10px; align-items: flex-end; flex-wrap: wrap">
+        <label class="stack" style="gap: 6px; min-width: 220px">
+          <div>邮箱验证码（可选）</div>
+          <input v-model="emailCode" inputmode="numeric" maxlength="6" placeholder="6位验证码" />
+          <div v-if="emailCodeHint" class="muted" style="font-size: 12px">{{ emailCodeHint }}</div>
+        </label>
+        <button class="btn" type="button" :disabled="emailCodeBusy" @click="sendEmailCode">
+          {{ emailCodeBusy ? '发送中…' : '发送验证码' }}
+        </button>
+      </div>
 
       <div v-if="password" class="card" style="padding: 8px; font-size: 13px; line-height: 1.35">
         <div class="muted" style="margin-bottom: 6px">

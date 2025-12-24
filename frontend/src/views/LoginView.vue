@@ -32,8 +32,8 @@ async function submit() {
 
     <div class="stack">
       <label class="stack" style="gap: 6px">
-        <div>用户名</div>
-        <input v-model="username" autocomplete="username" />
+        <div>邮箱 / 用户名 / PID</div>
+        <input v-model="username" autocomplete="username" placeholder="@username / 00001234 / you@example.com" />
       </label>
       <label class="stack" style="gap: 6px">
         <div>密码</div>
