@@ -3,13 +3,12 @@ from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.utils import timezone
+from django.core.cache import cache
 from rest_framework import permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.contrib.auth.hashers import check_password, make_password
-
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from accounts.audit import write_audit_log
@@ -253,6 +252,164 @@ class MeUsernameView(APIView):
         )
 
 
+class MePasswordChangeView(APIView):
+    """Change current user's primary password.
+
+    This is a sensitive operation; the client should present a second confirmation.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        current_password = str(request.data.get('current_password') or '')
+        new_password1 = str(request.data.get('new_password1') or '')
+        new_password2 = str(request.data.get('new_password2') or '')
+
+        if not current_password:
+            return Response({'current_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if not user.check_password(current_password):
+            return Response({'current_password': ['密码错误。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not new_password1:
+            return Response({'new_password1': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if new_password1 != new_password2:
+            return Response({'new_password2': ['两次输入不一致。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from django.contrib.auth.password_validation import validate_password
+
+            validate_password(new_password1, user=user)
+        except Exception as exc:
+            try:
+                from django.core.exceptions import ValidationError
+
+                if isinstance(exc, ValidationError):
+                    return Response({'new_password1': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception:
+                pass
+            return Response({'new_password1': [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password1)
+        user.save(update_fields=['password'])
+
+        write_audit_log(
+            actor=user,
+            action='user.password.change',
+            target_type='user',
+            target_id=str(user.id),
+            request=request,
+        )
+
+        return Response({'ok': True}, status=status.HTTP_200_OK)
+
+
+def _email_code_cache_key(email: str, *, purpose: str) -> str:
+    e = (email or '').strip().lower()
+    return f"email_code:{purpose}:{e}"
+
+
+class MeEmailVerifyCodeSendView(APIView):
+    """Reserve API: send a verification code to an email.
+
+    Notes:
+    - In DEBUG, if email sending is not configured, returns the code for dev use.
+    - In production, if email sending fails, returns 503.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(ratelimit(key='ip', rate='10/m', block=True))
+    def post(self, request):
+        email = str(request.data.get('email') or '').strip()
+        purpose = str(request.data.get('purpose') or 'generic').strip()[:32] or 'generic'
+
+        if not email:
+            return Response({'email': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            from django.core.validators import validate_email
+
+            validate_email(email)
+        except Exception:
+            return Response({'email': ['邮箱格式不正确。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        import secrets
+
+        code = str(secrets.randbelow(1_000_000)).zfill(6)
+        ttl_seconds = 10 * 60
+        cache.set(_email_code_cache_key(email, purpose=purpose), code, timeout=ttl_seconds)
+
+        # Best-effort sending. If not configured, dev can still proceed.
+        sent = False
+        try:
+            from django.core.mail import send_mail
+
+            subject = '验证码'
+            message = f"你的验证码是：{code}（10分钟内有效）"
+            from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or getattr(settings, 'SERVER_EMAIL', None) or ''
+            send_mail(subject, message, from_email, [email], fail_silently=False)
+            sent = True
+        except Exception:
+            sent = False
+
+        write_audit_log(
+            actor=request.user,
+            action='user.email_code.send',
+            target_type='user',
+            target_id=str(getattr(request.user, 'id', '')),
+            request=request,
+            metadata={'purpose': purpose, 'email': email, 'sent': bool(sent)},
+        )
+
+        if sent:
+            return Response({'ok': True}, status=status.HTTP_200_OK)
+
+        if getattr(settings, 'DEBUG', False):
+            return Response({'ok': True, 'dev_code': code}, status=status.HTTP_200_OK)
+
+        return Response({'detail': 'Email sending is not configured.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class MeEmailVerifyCodeVerifyView(APIView):
+    """Reserve API: verify an email code previously sent."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(ratelimit(key='ip', rate='30/m', block=True))
+    def post(self, request):
+        email = str(request.data.get('email') or '').strip()
+        code = str(request.data.get('code') or '').strip()
+        purpose = str(request.data.get('purpose') or 'generic').strip()[:32] or 'generic'
+
+        if not email:
+            return Response({'email': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+        if not code:
+            return Response({'code': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        key = _email_code_cache_key(email, purpose=purpose)
+        expected = cache.get(key)
+        if not expected:
+            return Response({'detail': '验证码已过期或不存在。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        import secrets
+
+        if not secrets.compare_digest(str(expected), code):
+            return Response({'code': ['验证码错误。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        cache.delete(key)
+
+        write_audit_log(
+            actor=request.user,
+            action='user.email_code.verify',
+            target_type='user',
+            target_id=str(getattr(request.user, 'id', '')),
+            request=request,
+            metadata={'purpose': purpose, 'email': email},
+        )
+
+        return Response({'ok': True}, status=status.HTTP_200_OK)
+
+
 class MePostsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -266,81 +423,6 @@ class MePostsView(APIView):
             .prefetch_related('resource__links')
             .order_by('-created_at', '-id')
         )
-
-
-class MeSecondaryPasswordView(APIView):
-    """Set or change secondary password.
-
-    Requires primary password confirmation.
-    """
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        user = request.user
-        current_password = str(request.data.get('current_password') or '')
-        secondary_password = str(request.data.get('secondary_password') or '')
-        secondary_password2 = str(request.data.get('secondary_password2') or '')
-
-        if not current_password:
-            return Response({'current_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
-        if not user.check_password(current_password):
-            return Response({'current_password': ['密码错误。']}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not secondary_password:
-            return Response({'secondary_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
-        if len(secondary_password) < 6:
-            return Response({'secondary_password': ['长度至少 6。']}, status=status.HTTP_400_BAD_REQUEST)
-        if len(secondary_password) > 64:
-            return Response({'secondary_password': ['长度不能超过 64。']}, status=status.HTTP_400_BAD_REQUEST)
-        if secondary_password != secondary_password2:
-            return Response({'secondary_password2': ['两次输入不一致。']}, status=status.HTTP_400_BAD_REQUEST)
-
-        user.secondary_password_hash = make_password(secondary_password)
-        # Reset verification window; require a fresh verify.
-        user.secondary_verified_at = None
-        user.save(update_fields=['secondary_password_hash', 'secondary_verified_at'])
-
-        write_audit_log(
-            actor=user,
-            action='user.secondary_password.set',
-            target_type='user',
-            target_id=str(user.id),
-            request=request,
-        )
-
-        return Response({'has_secondary_password': True}, status=status.HTTP_200_OK)
-
-
-class MeSecondaryPasswordVerifyView(APIView):
-    """Verify secondary password and open a time-limited window for privileged actions."""
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        user = request.user
-        secondary_password = str(request.data.get('secondary_password') or '')
-        if not secondary_password:
-            return Response({'secondary_password': ['必填。']}, status=status.HTTP_400_BAD_REQUEST)
-        h = (getattr(user, 'secondary_password_hash', '') or '').strip()
-        if not h:
-            return Response({'detail': '未设置二级密码。'}, status=status.HTTP_400_BAD_REQUEST)
-        if not check_password(secondary_password, h):
-            return Response({'secondary_password': ['二级密码错误。']}, status=status.HTTP_400_BAD_REQUEST)
-
-        user.secondary_verified_at = timezone.now()
-        user.save(update_fields=['secondary_verified_at'])
-
-        write_audit_log(
-            actor=user,
-            action='user.secondary_password.verify',
-            target_type='user',
-            target_id=str(user.id),
-            request=request,
-        )
-
-        return Response({'ok': True}, status=status.HTTP_200_OK)
-
         paginator = PageNumberPagination()
         paginator.page_size = 20
         page = paginator.paginate_queryset(qs, request)

@@ -22,7 +22,7 @@ from django_ratelimit.decorators import ratelimit
 
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
-from accounts.services import require_secondary_verified, staff_allowed_board_ids, staff_can_moderate_board, staff_can_delete_board
+from accounts.services import staff_allowed_board_ids, staff_can_moderate_board, staff_can_delete_board
 
 from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
 from .permissions import IsAuthorOrStaffOrReadOnly
@@ -379,7 +379,6 @@ class PostViewSet(viewsets.ModelViewSet):
         write_audit_log(actor=user, action='post.update', target_type='post', target_id=str(obj.id), request=self.request)
 
     def perform_destroy(self, instance):
-        require_secondary_verified(self.request.user)
         actor = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
         if getattr(instance, 'is_deleted', False):
             return
@@ -876,8 +875,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='moderation/pending', permission_classes=[IsModerator])
     def pending(self, request):
-        require_secondary_verified(request.user)
-
         mine = str(request.query_params.get('mine') or '1').strip().lower() in ('1', 'true', 'yes')
         board_slug = (request.query_params.get('board_slug') or '').strip()
         board_id = (request.query_params.get('board') or '').strip()
@@ -918,7 +915,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='approve', permission_classes=[IsModerator])
     def approve(self, request, pk=None):
-        require_secondary_verified(request.user)
         post = self.get_object()
         if getattr(post, 'is_deleted', False):
             raise PermissionDenied('Post is deleted.')
@@ -948,7 +944,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='reject', permission_classes=[IsModerator])
     def reject(self, request, pk=None):
-        require_secondary_verified(request.user)
         post = self.get_object()
         if getattr(post, 'is_deleted', False):
             raise PermissionDenied('Post is deleted.')
@@ -980,7 +975,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='moderation/claim', permission_classes=[IsModerator])
     def claim(self, request, pk=None):
-        require_secondary_verified(request.user)
         post = self.get_object()
         if getattr(post, 'is_deleted', False):
             return Response({'detail': 'Post is deleted.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1008,7 +1002,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='moderation/unclaim', permission_classes=[IsModerator])
     def unclaim(self, request, pk=None):
-        require_secondary_verified(request.user)
         post = self.get_object()
         if post.moderation_claimed_by_id and post.moderation_claimed_by_id != request.user.id and (not getattr(request.user, 'is_superuser', False)):
             raise PermissionDenied('Not allowed.')
@@ -1029,7 +1022,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='revisions', permission_classes=[IsModerator])
     def revisions(self, request, pk=None):
-        require_secondary_verified(request.user)
         post = self.get_object()
         if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
             raise PermissionDenied('Not allowed for this board.')
@@ -1047,7 +1039,6 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='revisions/(?P<rev_id>[^/.]+)/diff', permission_classes=[IsModerator])
     def revision_diff(self, request, pk=None, rev_id=None):
-        require_secondary_verified(request.user)
         post = self.get_object()
         if not staff_can_moderate_board(request.user, getattr(post, 'board_id', None)):
             raise PermissionDenied('Not allowed for this board.')
@@ -1122,7 +1113,6 @@ class CommentViewSet(viewsets.ModelViewSet):
         return qs.none()
 
     def destroy(self, request, *args, **kwargs):
-        require_secondary_verified(request.user)
         obj = self.get_object()
         user = request.user
         if not user or not user.is_authenticated:

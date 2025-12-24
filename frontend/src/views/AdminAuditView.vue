@@ -8,10 +8,6 @@ const error = ref('')
 const q = ref('')
 const includeArchived = ref(false)
 
-const needSecondary = ref(false)
-const secondary = ref('')
-const secondaryBusy = ref(false)
-
 const filteredLogs = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return logs.value
@@ -46,7 +42,6 @@ function fmtMeta(meta) {
 
 async function load() {
   error.value = ''
-  needSecondary.value = false
   try {
     const params = {}
     const s = q.value.trim()
@@ -56,27 +51,7 @@ async function load() {
     logs.value = data
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '加载审计日志失败。'
-    }
-  }
-}
-
-async function verifySecondary() {
-  secondaryBusy.value = true
-  error.value = ''
-  try {
-    await api.post('/api/me/secondary-password/verify/', { secondary_password: secondary.value })
-    secondary.value = ''
-    await auth.loadMe()
-    await load()
-  } catch (e) {
-    error.value = e?.response?.data?.detail || '二级密码验证失败。'
-  } finally {
-    secondaryBusy.value = false
+    error.value = detail || '加载审计日志失败。'
   }
 }
 
@@ -94,23 +69,13 @@ onMounted(load)
         <input v-model="q" placeholder="搜索（@用户名 / UID / action / target / ip）" style="max-width: 420px" />
         <label v-if="auth.state.me?.is_superuser" class="row" style="gap: 6px">
           <input type="checkbox" v-model="includeArchived" />
-          <span class="muted">包含归档（>30天，需二级密码）</span>
+          <span class="muted">包含归档（>30天）</span>
         </label>
         <button class="btn" @click="load">刷新</button>
       </div>
     </div>
 
-    <div v-if="needSecondary" class="card stack" style="border-color: #fecaca; background: #fff1f2">
-      <div style="font-weight: 700">需要二级密码</div>
-      <div class="muted">验证后才能查看审核日志。</div>
-      <div class="row" style="gap: 10px">
-        <input v-model="secondary" type="password" placeholder="输入二级密码" style="max-width: 260px" />
-        <button class="btn" :disabled="secondaryBusy" @click="verifySecondary">验证</button>
-      </div>
-      <div v-if="error" class="muted">{{ error }}</div>
-    </div>
-
-    <div v-else-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
+    <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
 
     <div class="card stack">
       <div v-for="l in filteredLogs" :key="l.id" class="card">

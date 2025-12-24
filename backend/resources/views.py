@@ -9,7 +9,7 @@ from rest_framework.response import Response
 
 from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
-from accounts.services import require_secondary_verified, staff_allowed_board_ids, staff_can_delete_board, staff_can_moderate_board, try_consume_download_quota
+from accounts.services import staff_allowed_board_ids, staff_can_delete_board, staff_can_moderate_board, try_consume_download_quota
 
 from .models import DownloadEvent, ResourceEntry, ResourceLink
 from .permissions import IsResourceOwnerOrStaff, IsResourceOwnerOrStaffOrReadOnly
@@ -43,7 +43,6 @@ class ResourceEntryViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=user, status=status_value)
 
     def destroy(self, request, *args, **kwargs):
-        require_secondary_verified(request.user)
         obj = self.get_object()
         user = request.user
         if user and user.is_authenticated and getattr(user, 'is_staff', False) and (not getattr(user, 'is_superuser', False)):
@@ -134,7 +133,6 @@ class ResourceLinkViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
-        require_secondary_verified(request.user)
         obj = self.get_object()
         user = request.user
         if user and user.is_authenticated and getattr(user, 'is_staff', False) and (not getattr(user, 'is_superuser', False)):

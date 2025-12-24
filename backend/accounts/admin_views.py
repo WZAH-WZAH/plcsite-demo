@@ -13,7 +13,7 @@ from .permissions import IsAdmin
 from .serializers import AdminUserSerializer
 from .models import StaffBoardPermission
 from forum.models import Board
-from .services import require_secondary_verified, staff_allowed_board_ids
+from .services import staff_allowed_board_ids
 
 User = get_user_model()
 
@@ -37,16 +37,10 @@ def _assert_can_manage(actor, target) -> None:
         raise PermissionDenied('Not allowed.')
 
 
-def _require_admin_secondary(request) -> None:
-    # All admin pages require secondary password.
-    require_secondary_verified(request.user)
-
-
 class AdminUserListView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        _require_admin_secondary(request)
         qs = User.objects.order_by('-date_joined')
         # Normal staff can only view normal users.
         if request.user and request.user.is_authenticated and (not getattr(request.user, 'is_superuser', False)):
@@ -59,7 +53,6 @@ class AdminBanUserView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -98,7 +91,6 @@ class AdminUnbanUserView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -126,7 +118,6 @@ class AdminMuteUserView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -165,7 +156,6 @@ class AdminUnmuteUserView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -193,13 +183,11 @@ class AdminAuditLogListView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        _require_admin_secondary(request)
-
         include_archived = str(request.query_params.get('include_archived') or '').strip().lower() in ('1', 'true', 'yes')
         now = timezone.now()
         month_ago = now - timedelta(days=30)
 
-        # Archived logs are only visible to superusers (and still require secondary password).
+        # Archived logs are only visible to superusers.
         if include_archived and (not getattr(request.user, 'is_superuser', False)):
             return Response({'detail': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -334,7 +322,6 @@ class AdminGrantStaffView(APIView):
     permission_classes = [IsAdmin]
 
     def post(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -364,7 +351,6 @@ class AdminRevokeStaffView(APIView):
     permission_classes = [IsAdmin]
 
     def post(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -395,7 +381,6 @@ class AdminUserBoardPermsView(APIView):
     permission_classes = [IsAdmin]
 
     def get(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -427,7 +412,6 @@ class AdminUserBoardPermsView(APIView):
         return Response(data)
 
     def put(self, request, user_id: int):
-        _require_admin_secondary(request)
         try:
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:

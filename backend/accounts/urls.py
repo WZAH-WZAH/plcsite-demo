@@ -16,14 +16,15 @@ from .admin_views import (
 )
 from .views import (
     CustomTokenObtainPairView,
+    MeEmailVerifyCodeSendView,
+    MeEmailVerifyCodeVerifyView,
     MeAvatarView,
     MeBioView,
     MeCheckinView,
     MeNicknameView,
+    MePasswordChangeView,
     MePostsView,
     MeUsernameView,
-    MeSecondaryPasswordView,
-    MeSecondaryPasswordVerifyView,
     MeView,
     PasswordCheckView,
     RegisterView,
@@ -42,8 +43,9 @@ urlpatterns = [
     path('me/bio/', MeBioView.as_view(), name='me-bio'),
     path('me/nickname/', MeNicknameView.as_view(), name='me-nickname'),
     path('me/username/', MeUsernameView.as_view(), name='me-username'),
-    path('me/secondary-password/', MeSecondaryPasswordView.as_view(), name='me-secondary-password'),
-    path('me/secondary-password/verify/', MeSecondaryPasswordVerifyView.as_view(), name='me-secondary-password-verify'),
+    path('me/password/', MePasswordChangeView.as_view(), name='me-password-change'),
+    path('me/email/verify-code/send/', MeEmailVerifyCodeSendView.as_view(), name='me-email-verify-code-send'),
+    path('me/email/verify-code/verify/', MeEmailVerifyCodeVerifyView.as_view(), name='me-email-verify-code-verify'),
     path('me/posts/', MePostsView.as_view(), name='me-posts'),
 
     # Social APIs

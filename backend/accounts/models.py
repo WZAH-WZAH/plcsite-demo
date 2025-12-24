@@ -30,7 +30,7 @@ class User(AbstractUser):
 	muted_until = models.DateTimeField(null=True, blank=True)
 	mute_reason = models.CharField(max_length=200, blank=True)
 
-	# Secondary password (2FA-like step-up for high-risk actions)
+	# Deprecated: secondary password (step-up) is no longer used.
 	secondary_password_hash = models.CharField(max_length=200, blank=True, default='')
 	secondary_verified_at = models.DateTimeField(null=True, blank=True)
 

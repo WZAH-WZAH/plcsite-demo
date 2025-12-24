@@ -7,37 +7,6 @@ from datetime import timedelta
 
 from .models import DailyDownloadStat, DailyLoginStat, DailyPointStat, StaffBoardPermission, User
 
-
-SECONDARY_VERIFY_TTL_MINUTES = 20
-
-
-def user_has_secondary_password(user: User) -> bool:
-    return bool((getattr(user, 'secondary_password_hash', '') or '').strip())
-
-
-def user_secondary_verified_recent(user: User, *, ttl_minutes: int = SECONDARY_VERIFY_TTL_MINUTES) -> bool:
-    ts = getattr(user, 'secondary_verified_at', None)
-    if ts is None:
-        return False
-    try:
-        return ts >= (timezone.now() - timedelta(minutes=int(ttl_minutes)))
-    except Exception:
-        return False
-
-
-def require_secondary_verified(user: User) -> None:
-    """Raise PermissionDenied-compatible exception text by callers."""
-
-    from rest_framework.exceptions import PermissionDenied
-
-    if not user or not getattr(user, 'is_authenticated', False):
-        raise PermissionDenied('Authentication required.')
-    if not user_has_secondary_password(user):
-        raise PermissionDenied('Secondary password required.')
-    if not user_secondary_verified_recent(user):
-        raise PermissionDenied('Secondary password required.')
-
-
 def get_or_create_today_stat(user: User) -> DailyDownloadStat:
     today = timezone.localdate()
     stat, _created = DailyDownloadStat.objects.get_or_create(user=user, date=today)

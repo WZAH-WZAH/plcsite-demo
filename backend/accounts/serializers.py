@@ -133,22 +133,9 @@ class MeSerializer(serializers.ModelSerializer):
             'is_muted',
             'muted_until',
             'mute_reason',
-            'has_secondary_password',
-            'secondary_verified_recent',
             'is_staff',
             'is_superuser',
         )
-
-    def get_has_secondary_password(self, obj) -> bool:
-        return bool((getattr(obj, 'secondary_password_hash', '') or '').strip())
-
-    def get_secondary_verified_recent(self, obj) -> bool:
-        try:
-            from .services import user_secondary_verified_recent
-
-            return bool(user_secondary_verified_recent(obj))
-        except Exception:
-            return False
 
     def get_avatar_url(self, obj) -> str:
         # 备注：

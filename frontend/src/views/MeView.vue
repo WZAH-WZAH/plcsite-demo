@@ -18,6 +18,10 @@ const bioDraft = ref('')
 const nicknameDraft = ref('')
 const usernameDraft = ref('')
 
+const currentPassword = ref('')
+const newPassword1 = ref('')
+const newPassword2 = ref('')
+
 const me = computed(() => auth.state.me)
 
 const meInitial = computed(() => {
@@ -153,6 +157,35 @@ async function saveUsername() {
     actionLoading.value = false
   }
 }
+
+async function changePassword() {
+  if (!auth.isAuthed()) {
+    error.value = '请先登录。'
+    return
+  }
+  if (!confirm('确定要修改密码吗？修改后需要重新登录。')) return
+
+  actionLoading.value = true
+  error.value = ''
+  try {
+    await api.post('/api/me/password/', {
+      current_password: String(currentPassword.value || ''),
+      new_password1: String(newPassword1.value || ''),
+      new_password2: String(newPassword2.value || ''),
+    })
+
+    currentPassword.value = ''
+    newPassword1.value = ''
+    newPassword2.value = ''
+
+    auth.logout()
+    await router.push('/login')
+  } catch (e) {
+    error.value = formatApiError(e, '修改密码失败。')
+  } finally {
+    actionLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -249,6 +282,26 @@ async function saveUsername() {
         </label>
         <button class="btn" type="button" :disabled="actionLoading" @click="saveUsername">保存用户名</button>
       </div>
+    </div>
+
+    <div v-if="me" class="card stack">
+      <h3 style="margin: 0">修改密码</h3>
+      <div class="row" style="gap: 10px; flex-wrap: wrap">
+        <label class="stack" style="gap: 6px; min-width: 220px">
+          <div>当前密码</div>
+          <input v-model="currentPassword" type="password" autocomplete="current-password" />
+        </label>
+        <label class="stack" style="gap: 6px; min-width: 220px">
+          <div>新密码</div>
+          <input v-model="newPassword1" type="password" autocomplete="new-password" />
+        </label>
+        <label class="stack" style="gap: 6px; min-width: 220px">
+          <div>确认新密码</div>
+          <input v-model="newPassword2" type="password" autocomplete="new-password" />
+        </label>
+        <button class="btn" type="button" :disabled="actionLoading" @click="changePassword">修改密码</button>
+      </div>
+      <div class="muted" style="font-size: 12px">提交前会二次确认，成功后需重新登录。</div>
     </div>
 
     <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2; white-space: pre-line">

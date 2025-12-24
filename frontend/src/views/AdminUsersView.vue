@@ -12,10 +12,6 @@ const banReason = ref({})
 const muteDays = ref({})
 const muteReason = ref({})
 
-const needSecondary = ref(false)
-const secondary = ref('')
-const secondaryBusy = ref(false)
-
 const permsOpenUserId = ref(null)
 const permsBusy = ref(false)
 const permsError = ref('')
@@ -35,33 +31,12 @@ function userHaystack(u) {
 
 async function load() {
   error.value = ''
-  needSecondary.value = false
   try {
     const { data } = await api.get('/api/admin/users/')
     users.value = data
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '加载用户失败。'
-    }
-  }
-}
-
-async function verifySecondary() {
-  secondaryBusy.value = true
-  error.value = ''
-  try {
-    await api.post('/api/me/secondary-password/verify/', { secondary_password: secondary.value })
-    secondary.value = ''
-    await auth.loadMe()
-    await load()
-  } catch (e) {
-    error.value = e?.response?.data?.detail || '二级密码验证失败。'
-  } finally {
-    secondaryBusy.value = false
+    error.value = detail || '加载用户失败。'
   }
 }
 
@@ -79,12 +54,7 @@ async function ban(userId) {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '操作失败。'
-    }
+    error.value = detail || '操作失败。'
   } finally {
     busy.value[userId] = false
   }
@@ -98,12 +68,7 @@ async function unban(userId) {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '操作失败。'
-    }
+    error.value = detail || '操作失败。'
   } finally {
     busy.value[userId] = false
   }
@@ -123,12 +88,7 @@ async function mute(userId) {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '操作失败。'
-    }
+    error.value = detail || '操作失败。'
   } finally {
     busy.value[userId] = false
   }
@@ -142,12 +102,7 @@ async function unmute(userId) {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '操作失败。'
-    }
+    error.value = detail || '操作失败。'
   } finally {
     busy.value[userId] = false
   }
@@ -161,12 +116,7 @@ async function grantStaff(userId) {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '操作失败。'
-    }
+    error.value = detail || '操作失败。'
   } finally {
     busy.value[userId] = false
   }
@@ -180,12 +130,7 @@ async function revokeStaff(userId) {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-    } else {
-      error.value = detail || '操作失败。'
-    }
+    error.value = detail || '操作失败。'
   } finally {
     busy.value[userId] = false
   }
@@ -208,13 +153,7 @@ async function toggleBoardPerms(u) {
     perms.value.permissions.sort((a, b) => String(a?.title || '').localeCompare(String(b?.title || '')))
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-      permsError.value = '需要二级密码验证。'
-    } else {
-      permsError.value = detail || '加载板块权限失败。'
-    }
+    permsError.value = detail || '加载板块权限失败。'
   } finally {
     permsBusy.value = false
   }
@@ -238,13 +177,7 @@ async function saveBoardPerms() {
     await load()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (detail === 'Secondary password required.') {
-      needSecondary.value = true
-      error.value = '需要二级密码验证。'
-      permsError.value = '需要二级密码验证。'
-    } else {
-      permsError.value = detail || '保存失败。'
-    }
+    permsError.value = detail || '保存失败。'
   } finally {
     permsBusy.value = false
   }
@@ -266,19 +199,9 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="needSecondary" class="card stack" style="border-color: #fecaca; background: #fff1f2">
-      <div style="font-weight: 700">需要二级密码</div>
-      <div class="muted">验证后才能进入用户管理。</div>
-      <div class="row" style="gap: 10px">
-        <input v-model="secondary" type="password" placeholder="输入二级密码" style="max-width: 260px" />
-        <button class="btn" :disabled="secondaryBusy" @click="verifySecondary">验证</button>
-      </div>
-      <div v-if="error" class="muted">{{ error }}</div>
-    </div>
+    <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
 
-    <div v-else-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
-
-    <div v-if="!needSecondary" class="card stack">
+    <div class="card stack">
       <div v-for="u in filteredUsers" :key="u.id" class="card stack" style="gap: 10px">
         <div class="row" style="justify-content: space-between">
           <div>
