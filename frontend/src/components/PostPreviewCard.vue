@@ -10,7 +10,12 @@ const props = defineProps({
 
 const to = computed(() => `/posts/${props.post?.id}`)
 const views = computed(() => Number(props.post?.views_count || 0))
-const authorLabel = computed(() => props.post?.author_nickname || props.post?.author_username || '')
+const authorUsername = computed(() => props.post?.author_username || '')
+const authorHandle = computed(() => {
+  const raw = String(authorUsername.value || '')
+  const u = raw.replace(/^@+/, '')
+  return u ? `@${u}` : ''
+})
 </script>
 
 <template>
@@ -36,7 +41,7 @@ const authorLabel = computed(() => props.post?.author_nickname || props.post?.au
       <div v-if="meta" class="muted bili-meta">{{ meta }}</div>
 
       <div class="bili-author">
-        <span class="up-icon">UP</span>{{ authorLabel }}
+        <span>By {{ authorHandle }}</span>
       </div>
     </div>
   </RouterLink>
@@ -122,15 +127,5 @@ const authorLabel = computed(() => props.post?.author_nickname || props.post?.au
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.up-icon {
-  border: 1px solid #9499a0;
-  border-radius: 3px;
-  padding: 0 2px;
-  font-size: 10px;
-  line-height: 12px;
-  transform: scale(0.9);
-  margin-right: 2px;
 }
 </style>

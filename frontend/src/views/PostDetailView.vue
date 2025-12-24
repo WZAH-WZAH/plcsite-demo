@@ -7,6 +7,8 @@ import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { sanitizeHtml } from '../sanitize'
 
+import PostActionBar from '../components/PostActionBar.vue'
+
 const route = useRoute()
 const router = useRouter()
 const post = ref(null)
@@ -254,6 +256,8 @@ onMounted(load)
         style="max-width: 100%; border-radius: 10px; margin-bottom: 12px"
       />
       <MdPreview :modelValue="post.body" :sanitize="sanitizeHtml" />
+
+      <PostActionBar :post="post" :isDetail="true" />
     </div>
 
     <div v-if="post?.resource?.links?.length" class="card stack">
@@ -265,7 +269,7 @@ onMounted(load)
       <div class="muted" style="font-size: 12px">下载会计入每日下载配额。</div>
     </div>
 
-    <div v-if="post" class="card stack">
+    <div v-if="post" id="comments" class="card stack">
       <div class="row" style="justify-content: space-between">
         <h3 style="margin: 0">评论</h3>
         <button class="btn" type="button" @click="loadComments" :disabled="commentsLoading">刷新</button>

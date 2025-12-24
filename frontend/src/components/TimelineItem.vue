@@ -1,12 +1,14 @@
 <script setup>
-  import { computed } from 'vue'
-  import { useRouter } from 'vue-router'
-    
-    const props = defineProps({
-      post: { type: Object, required: true }
-    })
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 
-    const router = useRouter()
+import PostActionBar from './PostActionBar.vue'
+
+const props = defineProps({
+  post: { type: Object, required: true },
+})
+
+const router = useRouter()
     
     // 仿 X 的时间格式化 (例如: 2h, 5m, 12月23日)
     function formatXTime(dateStr) {
@@ -21,70 +23,67 @@
       return (date.getMonth() + 1) + '月' + date.getDate() + '日'
     }
     
-    const timeDisplay = computed(() => formatXTime(props.post.created_at))
+const timeDisplay = computed(() => formatXTime(props.post.created_at))
 
-    const displayNickname = computed(() => props.post?.author_nickname || props.post?.author_username || '用户')
-    const displayHandle = computed(() => props.post?.author_username || '')
+const displayNickname = computed(() => props.post?.author_nickname || props.post?.author_username || '用户')
+const displayHandle = computed(() => props.post?.author_username || '')
 
-    const excerpt = computed(() => {
-      const raw = (props.post?.body || '').toString()
-      const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-      const lines = normalized
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
+const excerpt = computed(() => {
+  const raw = (props.post?.body || '').toString()
+  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
 
-      const text = lines.join('\n').trim()
-      if (!text) return ''
-      return text.length > 120 ? text.slice(0, 120) + '…' : text
-    })
-    </script>
+  const text = lines.join('\n').trim()
+  if (!text) return ''
+  return text.length > 120 ? text.slice(0, 120) + '…' : text
+})
+
+function goToDetail() {
+  if (window.getSelection().toString().length > 0) return
+  router.push(`/posts/${props.post.id}`)
+}
+
+function goToProfile() {
+  const u = props.post?.author_username
+  if (!u) return
+  // Project currently has no /u/:username route; keep behavior future-proof.
+  router.push(`/u/${u}`)
+}
+</script>
     
-    <template>
-      <div class="x-item" @click="router.push(`/posts/${post.id}`)">
-        <div class="x-avatar-area">
-          <div class="x-avatar">
-            {{ displayNickname?.[0]?.toUpperCase() || 'U' }}
-          </div>
-        </div>
-    
-        <div class="x-content">
-          
-          <div class="x-header">
-            <span class="x-name">{{ displayNickname }}</span>
-            <span v-if="displayHandle" class="x-handle">{{ displayHandle }}</span>
-            <span class="x-dot">·</span>
-            <span class="x-time">{{ timeDisplay }}</span>
-          </div>
-    
-          <div class="x-text">
-            <div class="x-title">{{ post.title }}</div>
-            <div v-if="excerpt" class="x-excerpt">{{ excerpt }}</div>
-            <div v-else class="muted">查看详情...</div>
-          </div>
-    
-          <div v-if="post.cover_image_url" class="x-media" @click.stop="router.push(`/posts/${post.id}`)">
-            <img :src="post.cover_image_url" loading="lazy" />
-          </div>
-    
-          <div class="x-actions">
-            <div class="x-action-btn comment">
-              <i>💬</i> <span>{{ post.comments_count || 0 }}</span>
-            </div>
-            <div class="x-action-btn repost">
-              <i>🔁</i> <span>0</span>
-            </div>
-            <div class="x-action-btn like">
-              <i>🤍</i> <span>{{ post.likes_count || 0 }}</span>
-            </div>
-            <div class="x-action-btn view">
-              <i>📊</i> <span>{{ post.views_count || 0 }}</span>
-            </div>
-          </div>
-    
-        </div>
+<template>
+  <div class="x-item" @click="goToDetail">
+    <div class="x-avatar-area">
+      <div class="x-avatar" @click.stop="goToProfile">
+        {{ displayNickname?.[0]?.toUpperCase() || 'U' }}
       </div>
-    </template>
+    </div>
+
+    <div class="x-content">
+      <div class="x-header">
+        <span class="x-name" @click.stop="goToProfile">{{ displayNickname }}</span>
+        <span v-if="displayHandle" class="x-handle">{{ displayHandle }}</span>
+        <span class="x-dot">·</span>
+        <span class="x-time">{{ timeDisplay }}</span>
+      </div>
+
+      <div class="x-text">
+        <div class="x-title">{{ post.title }}</div>
+        <div v-if="excerpt" class="x-excerpt">{{ excerpt }}</div>
+        <div v-else class="muted">查看详情...</div>
+      </div>
+
+      <div v-if="post.cover_image_url" class="x-media" @click.stop="goToDetail">
+        <img :src="post.cover_image_url" loading="lazy" />
+      </div>
+
+      <PostActionBar :post="post" />
+    </div>
+  </div>
+</template>
     
     <style scoped>
     /* 容器：没有圆角，只有底边框，像推特一样 */
@@ -166,30 +165,13 @@
       border-radius: 16px;
       border: 1px solid #e5e7eb;
       overflow: hidden;
-      max-height: 500px;
+      width: 100%;
     }
     .x-media img {
       width: 100%;
-      height: 100%;
+      height: auto;
+      max-height: 500px;
       object-fit: cover;
       display: block;
     }
-    
-    /* 底部操作栏 */
-    .x-actions {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 12px;
-      max-width: 400px; /* 限制宽度，不拉太长 */
-    }
-    .x-action-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #6b7280;
-      font-size: 13px;
-      transition: color 0.2s;
-    }
-    .x-action-btn i { font-style: normal; font-size: 16px; }
-    .x-action-btn:hover { color: #111827; }
     </style>
