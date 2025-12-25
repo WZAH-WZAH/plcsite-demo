@@ -218,6 +218,77 @@ class AuthEmailVerifyCodeVerifyView(APIView):
         return Response({'ok': True}, status=status.HTTP_200_OK)
 
 
+class PasswordResetView(APIView):
+    """
+    允许未登录用户通过 邮箱 + 验证码 重置密码。
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @method_decorator(ratelimit(key='ip', rate='5/m', block=True))
+    def post(self, request):
+        email = str(request.data.get('email') or '').strip()
+        code = str(request.data.get('code') or '').strip()
+        new_password = str(request.data.get('new_password') or '').strip()
+
+        if not email or not code or not new_password:
+            return Response({'detail': '缺少必要参数 (email, code, new_password)。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 1. 校验验证码 (注意 purpose 要对应)
+        # 客户端请求发验证码时，purpose 应该是 'reset_password'
+        key = _email_code_cache_key(email, purpose='reset_password')
+        expected = cache.get(key)
+        if not expected:
+            return Response({'detail': '验证码已过期或不存在。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        import secrets
+
+        if not secrets.compare_digest(str(expected), code):
+            return Response({'code': ['验证码错误。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. 查找用户
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            # 为了安全通常不提示“用户不存在”，但为了用户体验这里明确提示
+            return Response({'email': ['该邮箱未注册。']}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. 校验新密码强度
+        try:
+            from django.contrib.auth.password_validation import validate_password
+
+            validate_password(new_password, user=user)
+        except Exception as exc:
+            try:
+                from django.core.exceptions import ValidationError
+
+                if isinstance(exc, ValidationError):
+                    return Response({'new_password': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception:
+                pass
+            return Response({'new_password': [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. 重置密码
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+
+        # 销毁验证码，防止重放
+        cache.delete(key)
+
+        # 5. 记录审计日志
+        try:
+            write_audit_log(
+                actor=user,
+                action='user.password.reset',
+                target_type='user',
+                target_id=str(user.id),
+                request=request,
+            )
+        except Exception:
+            pass
+
+        return Response({'ok': True}, status=status.HTTP_200_OK)
+
+
 class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
