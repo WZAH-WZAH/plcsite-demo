@@ -15,3 +15,8 @@ backend/staticfiles/
 # Frontend (kept here too, even though frontend has its own .gitignore)
 frontend/node_modules/
 frontend/dist/
+
+# Environment variables (Sensitive!)
+.env
+backend/.env
+**/.env
