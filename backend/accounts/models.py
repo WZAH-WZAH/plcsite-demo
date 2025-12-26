@@ -27,20 +27,6 @@ class User(AbstractUser):
 	banned_until = models.DateTimeField(null=True, blank=True)
 	ban_reason = models.CharField(max_length=200, blank=True)
 
-	@property
-	def followers_count(self) -> int:
-		"""Number of users following this user."""
-		from .models import UserFollow
-
-		return int(UserFollow.objects.filter(following_id=self.id).count())
-
-	@property
-	def following_count(self) -> int:
-		"""Number of users this user follows."""
-		from .models import UserFollow
-
-		return int(UserFollow.objects.filter(follower_id=self.id).count())
-
 	# Mute (can read but cannot post/comment/upload resources)
 	is_muted = models.BooleanField(default=False)
 	muted_until = models.DateTimeField(null=True, blank=True)

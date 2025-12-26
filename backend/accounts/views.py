@@ -845,16 +845,17 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
 
     @action(detail=False, methods=['get', 'patch'], url_path='me')
     def me(self, request):
-        user = request.user
+        # Ensure count annotations (followers_count/following_count) are present.
+        user = self.get_queryset().filter(pk=request.user.pk).first() or request.user
         if request.method == 'GET':
             ser = self.get_serializer(user, context={'request': request})
             return Response(ser.data, status=status.HTTP_200_OK)
 
-        ser = self.get_serializer(user, data=request.data, partial=True, context={'request': request})
+        ser = self.get_serializer(request.user, data=request.data, partial=True, context={'request': request})
         ser.is_valid(raise_exception=True)
         ser.save()
 
-        user.refresh_from_db()
+        user = self.get_queryset().filter(pk=request.user.pk).first() or request.user
         return Response(self.get_serializer(user, context={'request': request}).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='follow')

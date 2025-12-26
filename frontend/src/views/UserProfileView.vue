@@ -8,11 +8,20 @@ const route = useRoute()
 const user = ref(null)
 const posts = ref([])
 const loading = ref(true)
+const error = ref('')
 
 async function loadData() {
   loading.value = true
-  const pid = route.params.pid
+  error.value = ''
+  user.value = null
+  posts.value = []
+
+  const pid = String(route.params.pid || '').trim()
   try {
+    if (!pid) {
+      error.value = '缺少用户 PID。'
+      return
+    }
     const { data: u } = await apiGet(`/api/users/${pid}/`, { __skipAuth: true })
     user.value = u
 
@@ -20,6 +29,9 @@ async function loadData() {
     posts.value = unwrapList(data)
   } catch (e) {
     console.error(e)
+    const status = e?.response?.status
+    if (status === 404) error.value = '用户不存在。'
+    else error.value = '加载失败，请稍后再试。'
   } finally {
     loading.value = false
   }
@@ -76,12 +88,43 @@ watch(() => route.params.pid, loadData)
   </div>
 
   <div v-else-if="loading" class="loading-screen">加载中...</div>
+
+  <div v-else class="loading-screen">
+    <div class="error-box">
+      <div class="error-title">{{ error || '加载失败' }}</div>
+      <div class="error-tip">请检查链接是否正确（PID），或稍后重试。</div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
 .space-container {
   background: #fff;
   min-height: 100vh;
+}
+
+.loading-screen {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+
+.error-box {
+  text-align: center;
+}
+
+.error-title {
+  font-size: 16px;
+  color: #111827;
+  font-weight: 600;
+}
+
+.error-tip {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #6b7280;
 }
 
 /* Banner */
