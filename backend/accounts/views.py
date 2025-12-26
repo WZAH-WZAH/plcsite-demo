@@ -4,18 +4,22 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.utils import timezone
 from django.core.cache import cache
+from django.db.models import Count
+from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, MultiPartParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import mixins, viewsets
+from rest_framework.decorators import action
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.audit import write_audit_log
 
 from .models import UserFollow
-from .serializers import MeSerializer, RegisterSerializer
+from .serializers import MeSerializer, PublicUserSerializer, RegisterSerializer, UserSelfSerializer
 from .services import (
     record_login_day,
     try_award_checkin_points,
@@ -795,3 +799,61 @@ class UserFollowToggleView(APIView):
 
         followers_count = UserFollow.objects.filter(following_id=target.id).count()
         return Response({'following': following, 'followers_count': followers_count}, status=status.HTTP_200_OK)
+
+
+class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Public user profiles + self profile.
+
+    Endpoints:
+    - GET /api/users/<username>/   (public)
+    - GET/PATCH /api/users/me/     (auth)
+    """
+
+    permission_classes = [permissions.AllowAny]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    lookup_field = 'username'
+    # Reserve 'me' for the special endpoint.
+    lookup_value_regex = r'(?!me$)[^/]+'
+
+    def get_queryset(self):
+        return (
+            User.objects.all()
+            .annotate(
+                followers_count=Count('follower_users', distinct=True),
+                following_count=Count('following_users', distinct=True),
+            )
+            .order_by('id')
+        )
+
+    def get_serializer_class(self):
+        if self.action == 'me':
+            return UserSelfSerializer
+        return PublicUserSerializer
+
+    def get_permissions(self):
+        if self.action == 'me':
+            return [permissions.IsAuthenticated()]
+        return [permissions.AllowAny()]
+
+    def get_object(self):
+        username = str(self.kwargs.get(self.lookup_field) or '').strip()
+        if username and not username.startswith('@'):
+            username = '@' + username
+        qs = self.filter_queryset(self.get_queryset())
+        obj = get_object_or_404(qs, username__iexact=username)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    @action(detail=False, methods=['get', 'patch'], url_path='me')
+    def me(self, request):
+        user = request.user
+        if request.method == 'GET':
+            ser = self.get_serializer(user, context={'request': request})
+            return Response(ser.data, status=status.HTTP_200_OK)
+
+        ser = self.get_serializer(user, data=request.data, partial=True, context={'request': request})
+        ser.is_valid(raise_exception=True)
+        ser.save()
+
+        user.refresh_from_db()
+        return Response(self.get_serializer(user, context={'request': request}).data, status=status.HTTP_200_OK)

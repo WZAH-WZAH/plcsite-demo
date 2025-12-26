@@ -1,5 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework.routers import DefaultRouter
 
 from .admin_views import (
     AdminAuditLogListView,
@@ -32,7 +33,12 @@ from .views import (
     PasswordResetView,
     RegisterView,
     UserFollowToggleView,
+    UserViewSet,
 )
+
+
+router = DefaultRouter()
+router.register('users', UserViewSet, basename='user')
 
 
 urlpatterns = [
@@ -68,3 +74,5 @@ urlpatterns = [
     path('admin/users/<int:user_id>/board-perms/', AdminUserBoardPermsView.as_view(), name='admin-user-board-perms'),
     path('admin/audit/', AdminAuditLogListView.as_view(), name='admin-audit'),
 ]
+
+urlpatterns += router.urls

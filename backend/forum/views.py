@@ -159,13 +159,24 @@ class PostViewSet(viewsets.ModelViewSet):
         else:
             filtered = qs.filter(status=Post.Status.PUBLISHED)
 
-        board_id = self.request.query_params.get('board')
-        if board_id:
-            try:
-                board_id_int = int(board_id)
-                filtered = filtered.filter(board_id=board_id_int)
-            except ValueError:
-                pass
+        board_value = (self.request.query_params.get('board') or '').strip()
+        if board_value:
+            if board_value.isdigit():
+                try:
+                    filtered = filtered.filter(board_id=int(board_value))
+                except Exception:
+                    pass
+            else:
+                filtered = filtered.filter(board__slug=board_value)
+
+        author_username = (
+            (self.request.query_params.get('author__username') or '').strip()
+            or (self.request.query_params.get('author_username') or '').strip()
+        )
+        if author_username:
+            if not author_username.startswith('@'):
+                author_username = '@' + author_username
+            filtered = filtered.filter(author__username__iexact=author_username)
 
         q = (self.request.query_params.get('q') or '').strip()
         if q:

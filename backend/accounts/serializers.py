@@ -236,6 +236,87 @@ class MeSerializer(serializers.ModelSerializer):
         return int(getattr(stat, 'post_points_earned', 0) or 0)
 
 
+def _build_abs_media_url(request, file_field) -> str:
+    if not file_field:
+        return ''
+    try:
+        url = file_field.url
+    except Exception:
+        return ''
+    if request is None:
+        return url
+    return request.build_absolute_uri(url)
+
+
+class PublicUserSerializer(serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+    banner_url = serializers.SerializerMethodField()
+    followers_count = serializers.IntegerField(read_only=True)
+    following_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'username',
+            'nickname',
+            'bio',
+            'avatar_url',
+            'banner_url',
+            'followers_count',
+            'following_count',
+        )
+
+    def get_avatar_url(self, obj) -> str:
+        return _build_abs_media_url(self.context.get('request'), getattr(obj, 'avatar', None))
+
+    def get_banner_url(self, obj) -> str:
+        return _build_abs_media_url(self.context.get('request'), getattr(obj, 'banner', None))
+
+
+class UserSelfSerializer(serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+    banner_url = serializers.SerializerMethodField()
+    followers_count = serializers.IntegerField(read_only=True)
+    following_count = serializers.IntegerField(read_only=True)
+
+    # Only allow updating bio/banner via this endpoint.
+    banner = serializers.ImageField(write_only=True, required=False, allow_null=True)
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'pid',
+            'username',
+            'nickname',
+            'email',
+            'bio',
+            'avatar_url',
+            'banner_url',
+            'banner',
+            'followers_count',
+            'following_count',
+        )
+        read_only_fields = (
+            'id',
+            'pid',
+            'username',
+            'nickname',
+            'email',
+            'avatar_url',
+            'banner_url',
+            'followers_count',
+            'following_count',
+        )
+
+    def get_avatar_url(self, obj) -> str:
+        return _build_abs_media_url(self.context.get('request'), getattr(obj, 'avatar', None))
+
+    def get_banner_url(self, obj) -> str:
+        return _build_abs_media_url(self.context.get('request'), getattr(obj, 'banner', None))
+
+
 class AdminUserSerializer(serializers.ModelSerializer):
     level = serializers.IntegerField(read_only=True)
     daily_download_limit = serializers.IntegerField(read_only=True)

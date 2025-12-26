@@ -21,9 +21,25 @@ class User(AbstractUser):
 	# - 目前仅支持上传一张图片作为头像；后续可扩展为“头像框/挂件/预设头像”等。
 	# - 前端在用户首次注册后会提示设置头像；首次设置不扣积分，后续更换可扣积分（见 /api/me/avatar/）。
 	avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
+	# 头图（公开主页/B站风格个人空间用）
+	banner = models.ImageField(upload_to='banners/', null=True, blank=True)
 	is_banned = models.BooleanField(default=False)
 	banned_until = models.DateTimeField(null=True, blank=True)
 	ban_reason = models.CharField(max_length=200, blank=True)
+
+	@property
+	def followers_count(self) -> int:
+		"""Number of users following this user."""
+		from .models import UserFollow
+
+		return int(UserFollow.objects.filter(following_id=self.id).count())
+
+	@property
+	def following_count(self) -> int:
+		"""Number of users this user follows."""
+		from .models import UserFollow
+
+		return int(UserFollow.objects.filter(follower_id=self.id).count())
 
 	# Mute (can read but cannot post/comment/upload resources)
 	is_muted = models.BooleanField(default=False)
