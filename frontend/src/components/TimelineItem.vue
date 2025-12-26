@@ -1,7 +1,6 @@
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-
 import PostActionBar from './PostActionBar.vue'
 
 const props = defineProps({
@@ -9,37 +8,6 @@ const props = defineProps({
 })
 
 const router = useRouter()
-    
-    // 仿 X 的时间格式化 (例如: 2h, 5m, 12月23日)
-    function formatXTime(dateStr) {
-      if (!dateStr) return ''
-      const date = new Date(dateStr)
-      const now = new Date()
-      const diff = (now - date) / 1000 // 秒
-      
-      if (diff < 60) return '刚刚'
-      if (diff < 3600) return Math.floor(diff / 60) + 'm'
-      if (diff < 86400) return Math.floor(diff / 3600) + 'h'
-      return (date.getMonth() + 1) + '月' + date.getDate() + '日'
-    }
-    
-const timeDisplay = computed(() => formatXTime(props.post.created_at))
-
-const displayNickname = computed(() => props.post?.author_nickname || props.post?.author_username || '用户')
-const displayHandle = computed(() => props.post?.author_username || '')
-
-const excerpt = computed(() => {
-  const raw = (props.post?.body || '').toString()
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = normalized
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  const text = lines.join('\n').trim()
-  if (!text) return ''
-  return text.length > 120 ? text.slice(0, 120) + '…' : text
-})
 
 function goToDetail() {
   if (window.getSelection().toString().length > 0) return
@@ -51,31 +19,52 @@ function goToProfile() {
   if (!pid) return
   router.push(`/u/${pid}`)
 }
+
+// 昵称优先
+const displayName = computed(() => props.post.author_nickname || props.post.author_username)
+const handle = computed(() => String(props.post.author_username || '').replace(/^@+/, ''))
+
+const generatedExcerpt = computed(() => {
+  if (props.post.excerpt) return props.post.excerpt
+  const text = props.post.body || ''
+  const cleanText = text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+  return cleanText.length > 140 ? cleanText.slice(0, 140) + '...' : cleanText
+})
+
+function formatTime(dateStr) {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const diff = (new Date() - date) / 1000
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return Math.floor(diff / 60) + 'm'
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h'
+  return date.getMonth() + 1 + '月' + date.getDate() + '日'
+}
 </script>
-    
+
 <template>
-  <div class="x-item" @click="goToDetail">
-    <div class="x-avatar-area">
-      <div class="x-avatar" @click.stop="goToProfile">
-        {{ displayNickname?.[0]?.toUpperCase() || 'U' }}
+  <div class="tl-item" @click="goToDetail">
+    <div class="tl-avatar-col">
+      <div class="tl-avatar" @click.stop="goToProfile">
+        <img v-if="post.author_avatar" :src="post.author_avatar" class="avatar-img" />
+        <span v-else class="avatar-text">{{ displayName?.[0]?.toUpperCase() }}</span>
       </div>
     </div>
 
-    <div class="x-content">
-      <div class="x-header">
-        <span class="x-name" @click.stop="goToProfile">{{ displayNickname }}</span>
-        <span v-if="displayHandle" class="x-handle">{{ displayHandle }}</span>
-        <span class="x-dot">·</span>
-        <span class="x-time">{{ timeDisplay }}</span>
+    <div class="tl-content">
+      <div class="tl-header">
+        <span class="tl-name" @click.stop="goToProfile">{{ displayName }}</span>
+        <span v-if="handle" class="tl-meta">@{{ handle }}</span>
+        <span class="tl-dot">·</span>
+        <span class="tl-meta">{{ formatTime(post.created_at) }}</span>
       </div>
 
-      <div class="x-text">
-        <div class="x-title">{{ post.title }}</div>
-        <div v-if="excerpt" class="x-excerpt">{{ excerpt }}</div>
-        <div v-else class="muted">查看详情...</div>
+      <div class="tl-text">
+        <span class="tl-title-tag">#{{ post.title }}#</span>
+        {{ generatedExcerpt }}
       </div>
 
-      <div v-if="post.cover_image_url" class="x-media" @click.stop="goToDetail">
+      <div v-if="post.cover_image_url" class="tl-media" @click.stop="goToDetail">
         <img :src="post.cover_image_url" loading="lazy" />
       </div>
 
@@ -83,94 +72,112 @@ function goToProfile() {
     </div>
   </div>
 </template>
-    
-    <style scoped>
-    /* 容器：没有圆角，只有底边框，像推特一样 */
-    .x-item {
-      display: flex;
-      padding: 12px 16px;
-      border-bottom: 1px solid #e5e7eb;
-      cursor: pointer;
-      background: #ffffff;
-      transition: background-color 0.2s;
-    }
-    .x-item:hover {
-      background-color: #f9fafb;
-    }
-    
-    /* 左侧头像 */
-    .x-avatar-area {
-      margin-right: 12px;
-      flex-shrink: 0;
-    }
-    .x-avatar {
-      width: 40px; height: 40px;
-      background: #ffffff;
-      border-radius: 50%;
-      border: 1px solid #e5e7eb;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      color: #111827;
-    }
-    
-    /* 右侧内容 */
-    .x-content {
-      flex: 1;
-      min-width: 0;
-    }
-    
-    /* 头部信息 */
-    .x-header {
-      display: flex;
-      align-items: baseline;
-      font-size: 15px;
-      line-height: 20px;
-    }
-    .x-name {
-      font-weight: 700;
-      color: #111827;
-      margin-right: 4px;
-    }
-    .x-handle, .x-dot, .x-time {
-      color: #6b7280;
-      font-size: 15px;
-    }
-    .x-dot { margin: 0 4px; }
-    
-    /* 文本 */
-    .x-text {
-      font-size: 15px;
-      line-height: 20px;
-      color: #111827;
-      margin-top: 2px;
-      word-wrap: break-word;
-    }
 
-    .x-title {
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
+<style scoped>
+.tl-item {
+  display: flex;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eff3f4;
+  cursor: pointer;
+  background: #fff;
+  transition: background-color 0.2s;
+}
 
-    .x-excerpt {
-      color: #111827;
-      white-space: pre-line;
-    }
-    
-    /* 媒体图 (圆角大图) */
-    .x-media {
-      margin-top: 10px;
-      border-radius: 16px;
-      border: 1px solid #e5e7eb;
-      overflow: hidden;
-      width: 100%;
-    }
-    .x-media img {
-      width: 100%;
-      height: auto;
-      max-height: 500px;
-      object-fit: cover;
-      display: block;
-    }
-    </style>
+.tl-item:hover {
+  background-color: #f7f9f9;
+}
+
+.tl-avatar-col {
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.tl-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+}
+
+.tl-avatar:hover {
+  opacity: 0.85;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-text {
+  font-weight: 700;
+  color: #6b7280;
+}
+
+.tl-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tl-header {
+  display: flex;
+  align-items: baseline;
+  font-size: 15px;
+  line-height: 20px;
+  margin-bottom: 2px;
+}
+
+.tl-name {
+  font-weight: 700;
+  color: #0f1419;
+  margin-right: 4px;
+}
+
+.tl-name:hover {
+  text-decoration: underline;
+}
+
+.tl-meta,
+.tl-dot {
+  color: #536471;
+  font-size: 15px;
+}
+
+.tl-dot {
+  margin: 0 4px;
+}
+
+.tl-text {
+  font-size: 15px;
+  line-height: 20px;
+  color: #0f1419;
+  margin-bottom: 10px;
+  word-wrap: break-word;
+}
+
+.tl-title-tag {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.tl-media {
+  margin-top: 10px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  width: 100%;
+}
+
+.tl-media img {
+  width: 100%;
+  height: auto;
+  max-height: 500px;
+  object-fit: cover;
+  display: block;
+}
+</style>

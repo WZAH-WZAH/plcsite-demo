@@ -4,24 +4,24 @@ import { useRouter } from 'vue-router'
 
 const props = defineProps({
   post: { type: Object, required: true },
-  meta: { type: String, default: '' },
-  titleHtml: { type: String, default: '' },
-  showViews: { type: Boolean, default: true },
-})
-
-const to = computed(() => `/posts/${props.post?.id}`)
-const views = computed(() => Number(props.post?.views_count || 0))
-const authorUsername = computed(() => props.post?.author_username || '')
-const authorPid = computed(() => String(props.post?.author_pid || '').trim())
-const authorHandle = computed(() => {
-  const raw = String(authorUsername.value || '')
-  const u = raw.replace(/^@+/, '')
-  return u ? `@${u}` : ''
 })
 
 const router = useRouter()
 
-function goToAuthor(e) {
+// 数字格式化
+function formatNumber(num) {
+  if (!num) return '0'
+  const n = Number(num)
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return n.toString()
+}
+
+const formattedViews = computed(() => formatNumber(props.post.views_count))
+const authorPid = computed(() => String(props.post?.author_pid || '').trim())
+// 优先显示昵称
+const displayName = computed(() => props.post.author_nickname || props.post.author_username)
+
+function goToProfile(e) {
   e?.preventDefault?.()
   e?.stopPropagation?.()
   if (!authorPid.value) return
@@ -30,30 +30,31 @@ function goToAuthor(e) {
 </script>
 
 <template>
-  <RouterLink :to="to" class="bili-card">
+  <RouterLink :to="`/posts/${post.id}`" class="bili-card">
     <div class="bili-card-cover">
-      <img v-if="post?.cover_image_url" :src="post.cover_image_url" loading="lazy" />
-      <div v-if="showViews" class="bili-stats">
+      <img v-if="post.cover_image_url" :src="post.cover_image_url" loading="lazy" :alt="post.title" />
+      <div class="bili-stats">
         <span class="stat-item">
-          <svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor">
-            <path
-              d="M6 3.5C3.5 3.5 1.5 6 1.5 6s2 2.5 4.5 2.5S10.5 6 10.5 6 8.5 3.5 6 3.5zM6 7a1 1 0 110-2 1 1 0 010 2z"
-            />
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
           </svg>
-          {{ views }}
+          <span style="margin-left: 4px">{{ formattedViews }}</span>
         </span>
       </div>
     </div>
-
     <div class="bili-card-info">
-      <div v-if="titleHtml" class="bili-title" :title="post?.title" v-html="titleHtml"></div>
-      <div v-else class="bili-title" :title="post?.title">{{ post?.title }}</div>
-
-      <div v-if="meta" class="muted bili-meta">{{ meta }}</div>
-
-      <div class="bili-author">
-        <button type="button" class="bili-author-link" @click="goToAuthor">By {{ authorHandle }}</button>
-      </div>
+      <div class="bili-title" :title="post.title">{{ post.title }}</div>
+      <button class="bili-author" type="button" @click="goToProfile">By {{ displayName }}</button>
     </div>
   </RouterLink>
 </template>
@@ -64,6 +65,7 @@ function goToAuthor(e) {
   flex-direction: column;
   text-decoration: none;
   color: inherit;
+  cursor: pointer;
 }
 
 .bili-card-cover {
@@ -83,6 +85,11 @@ function goToAuthor(e) {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.bili-card:hover .bili-card-cover img {
+  transform: scale(1.05);
 }
 
 .bili-stats {
@@ -126,29 +133,20 @@ function goToAuthor(e) {
   color: #00aeec;
 }
 
-.bili-meta {
-  font-size: 12px;
-  margin-top: 4px;
-}
-
 .bili-author {
   font-size: 12px;
   color: #9499a0;
   margin-top: 4px;
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-.bili-author-link {
+  transition: color 0.2s;
   padding: 0;
   border: 0;
   background: transparent;
-  color: inherit;
   cursor: pointer;
 }
 
-.bili-author-link:hover {
+.bili-author:hover {
   color: #00aeec;
 }
 </style>
