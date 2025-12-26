@@ -25,20 +25,20 @@ const replyDraft = ref('')
 const canEdit = computed(() => {
   const me = auth.state.me
   if (!me || !post.value) return false
-  return me.username === post.value.author_username
+  return me.pid && post.value.author_pid && me.pid === post.value.author_pid
 })
 
 const canFollowAuthor = computed(() => {
   const me = auth.state.me
   if (!me || !post.value) return false
   // Avoid self-follow.
-  return me.username && post.value.author_username && me.username !== post.value.author_username
+  return me.pid && post.value.author_pid && me.pid !== post.value.author_pid
 })
 
 const canDelete = computed(() => {
   const me = auth.state.me
   if (!me || !post.value) return false
-  return me.is_staff || me.username === post.value.author_username
+  return me.is_staff || (me.pid && post.value.author_pid && me.pid === post.value.author_pid)
 })
 
 const postAuthorNickname = computed(() => post.value?.author_nickname || '')
@@ -194,7 +194,9 @@ async function toggleFollowAuthor() {
   if (!canFollowAuthor.value) return
 
   try {
-    const { data } = await api.post(`/api/users/${post.value.author}/follow/`)
+    const pid = String(post.value?.author_pid || '').trim()
+    if (!pid) return
+    const { data } = await api.post(`/api/users/${pid}/follow/`)
     post.value.is_following_author = !!data.following
   } catch (e) {
     error.value = e?.response?.data?.detail || '关注操作失败。'

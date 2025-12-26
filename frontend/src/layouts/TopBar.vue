@@ -58,9 +58,9 @@ const meInitial = computed(() => {
 })
 
 function goToMySpace() {
-  const u = (auth.state.me?.username || '').trim()
-  if (!u) return
-  router.push(`/u/${u}`)
+  const pid = String(auth.state.me?.pid || '').trim()
+  if (!pid) return
+  router.push(`/u/${pid}`)
 }
 
 onMounted(async () => {

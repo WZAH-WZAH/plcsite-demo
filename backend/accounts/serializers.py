@@ -257,7 +257,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
-            'id',
+            'pid',
             'username',
             'nickname',
             'bio',
@@ -286,7 +286,6 @@ class UserSelfSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
-            'id',
             'pid',
             'username',
             'nickname',
@@ -299,7 +298,6 @@ class UserSelfSerializer(serializers.ModelSerializer):
             'following_count',
         )
         read_only_fields = (
-            'id',
             'pid',
             'username',
             'nickname',

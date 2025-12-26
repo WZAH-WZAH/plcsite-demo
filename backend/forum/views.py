@@ -18,6 +18,8 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
+from django_filters.rest_framework import DjangoFilterBackend
+
 from django_ratelimit.decorators import ratelimit
 
 from accounts.audit import write_audit_log
@@ -122,6 +124,8 @@ class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.select_related('board', 'author', 'reviewed_by').prefetch_related('resource__links')
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsAuthorOrStaffOrReadOnly]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['board', 'author__pid']
 
     @method_decorator(ratelimit(key='user_or_ip', rate='5/m', method='POST', block=False))
     def create(self, request, *args, **kwargs):
@@ -177,6 +181,10 @@ class PostViewSet(viewsets.ModelViewSet):
             if not author_username.startswith('@'):
                 author_username = '@' + author_username
             filtered = filtered.filter(author__username__iexact=author_username)
+
+        author_pid = (self.request.query_params.get('author__pid') or '').strip()
+        if author_pid:
+            filtered = filtered.filter(author__pid=author_pid)
 
         q = (self.request.query_params.get('q') or '').strip()
         if q:
@@ -606,7 +614,7 @@ class PostViewSet(viewsets.ModelViewSet):
         - This is a lightweight placeholder for a future homepage feed.
         """
 
-        qs = self.get_queryset().filter(status=Post.Status.PUBLISHED).order_by('-created_at')
+        qs = self.filter_queryset(self.get_queryset().filter(status=Post.Status.PUBLISHED)).order_by('-created_at')
         page = self.paginate_queryset(qs)
         if page is not None:
             return self.get_paginated_response(self.get_serializer(page, many=True).data)

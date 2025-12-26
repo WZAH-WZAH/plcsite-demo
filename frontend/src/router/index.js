@@ -45,7 +45,7 @@ const router = createRouter({
     { path: '/notifications', name: 'notifications', component: NotificationsView, meta: { requiresAuth: true } },
 
     { path: '/me', name: 'me', component: MeView, meta: { requiresAuth: true } },
-    { path: '/u/:username', name: 'user-profile', component: UserProfileView },
+    { path: '/u/:pid', name: 'user-profile', component: UserProfileView },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
 

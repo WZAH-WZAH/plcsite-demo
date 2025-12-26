@@ -32,7 +32,6 @@ from .views import (
     PasswordCheckView,
     PasswordResetView,
     RegisterView,
-    UserFollowToggleView,
     UserViewSet,
 )
 
@@ -59,9 +58,6 @@ urlpatterns = [
     path('me/email/verify-code/send/', MeEmailVerifyCodeSendView.as_view(), name='me-email-verify-code-send'),
     path('me/email/verify-code/verify/', MeEmailVerifyCodeVerifyView.as_view(), name='me-email-verify-code-verify'),
     path('me/posts/', MePostsView.as_view(), name='me-posts'),
-
-    # Social APIs
-    path('users/<int:user_id>/follow/', UserFollowToggleView.as_view(), name='user-follow-toggle'),
 
     # Admin APIs (基础管理：用户封禁/审计)
     path('admin/users/', AdminUserListView.as_view(), name='admin-users'),

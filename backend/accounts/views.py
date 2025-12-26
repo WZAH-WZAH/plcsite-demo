@@ -805,15 +805,16 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
     """Public user profiles + self profile.
 
     Endpoints:
-    - GET /api/users/<username>/   (public)
+    - GET /api/users/<pid>/        (public)
     - GET/PATCH /api/users/me/     (auth)
+    - POST /api/users/<pid>/follow/ (auth)
     """
 
     permission_classes = [permissions.AllowAny]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
-    lookup_field = 'username'
-    # Reserve 'me' for the special endpoint.
-    lookup_value_regex = r'(?!me$)[^/]+'
+    lookup_field = 'pid'
+    # PID is a system-generated numeric string (may include leading zeros).
+    lookup_value_regex = r'\d{1,8}'
 
     def get_queryset(self):
         return (
@@ -831,16 +832,14 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
         return PublicUserSerializer
 
     def get_permissions(self):
-        if self.action == 'me':
+        if self.action in ('me', 'follow'):
             return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
     def get_object(self):
-        username = str(self.kwargs.get(self.lookup_field) or '').strip()
-        if username and not username.startswith('@'):
-            username = '@' + username
+        pid = str(self.kwargs.get(self.lookup_field) or '').strip()
         qs = self.filter_queryset(self.get_queryset())
-        obj = get_object_or_404(qs, username__iexact=username)
+        obj = get_object_or_404(qs, pid=pid)
         self.check_object_permissions(self.request, obj)
         return obj
 
@@ -857,3 +856,36 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
 
         user.refresh_from_db()
         return Response(self.get_serializer(user, context={'request': request}).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='follow')
+    def follow(self, request, pid=None):
+        """Toggle follow/unfollow for a user by PID."""
+
+        follower = request.user
+        if getattr(follower, 'is_currently_banned', False):
+            return Response({'detail': 'User is banned.'}, status=status.HTTP_403_FORBIDDEN)
+
+        target = self.get_object()
+        if follower.id == target.id:
+            return Response({'detail': 'Cannot follow yourself.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        obj = UserFollow.objects.filter(follower_id=follower.id, following_id=target.id).first()
+        if obj is not None:
+            obj.delete()
+            following = False
+            audit_action = 'user.unfollow'
+        else:
+            UserFollow.objects.create(follower_id=follower.id, following_id=target.id)
+            following = True
+            audit_action = 'user.follow'
+
+        write_audit_log(
+            actor=follower,
+            action=audit_action,
+            target_type='user',
+            target_id=str(target.pid or ''),
+            request=request,
+        )
+
+        followers_count = UserFollow.objects.filter(following_id=target.id).count()
+        return Response({'following': following, 'followers_count': followers_count}, status=status.HTTP_200_OK)

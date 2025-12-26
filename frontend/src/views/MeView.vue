@@ -77,8 +77,8 @@ async function saveBio() {
 }
 
 function viewMySpace() {
-  if (!user.value.username) return
-  router.push(`/u/${user.value.username}`)
+  if (!user.value.pid) return
+  router.push(`/u/${user.value.pid}`)
 }
 </script>
 
@@ -108,7 +108,7 @@ function viewMySpace() {
       <div class="setting-item">
         <div class="label">昵称</div>
         <div class="static-text">
-          {{ user.username }} <span class="muted" v-if="user.id">(UID: {{ user.id }})</span>
+          {{ user.username }}
         </div>
       </div>
 

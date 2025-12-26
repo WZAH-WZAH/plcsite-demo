@@ -47,10 +47,9 @@ function goToDetail() {
 }
 
 function goToProfile() {
-  const u = props.post?.author_username
-  if (!u) return
-  // Project currently has no /u/:username route; keep behavior future-proof.
-  router.push(`/u/${u}`)
+  const pid = props.post?.author_pid
+  if (!pid) return
+  router.push(`/u/${pid}`)
 }
 </script>
     

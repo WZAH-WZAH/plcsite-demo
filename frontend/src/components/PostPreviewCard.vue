@@ -12,6 +12,7 @@ const props = defineProps({
 const to = computed(() => `/posts/${props.post?.id}`)
 const views = computed(() => Number(props.post?.views_count || 0))
 const authorUsername = computed(() => props.post?.author_username || '')
+const authorPid = computed(() => String(props.post?.author_pid || '').trim())
 const authorHandle = computed(() => {
   const raw = String(authorUsername.value || '')
   const u = raw.replace(/^@+/, '')
@@ -23,9 +24,8 @@ const router = useRouter()
 function goToAuthor(e) {
   e?.preventDefault?.()
   e?.stopPropagation?.()
-  const u = String(authorUsername.value || '').replace(/^@+/, '').trim()
-  if (!u) return
-  router.push(`/u/${u}`)
+  if (!authorPid.value) return
+  router.push(`/u/${authorPid.value}`)
 }
 </script>
 

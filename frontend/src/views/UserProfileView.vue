@@ -11,19 +11,12 @@ const loading = ref(true)
 
 async function loadData() {
   loading.value = true
-  const username = route.params.username
+  const pid = route.params.pid
   try {
-    user.value = {
-      username: username,
-      avatar: `https://api.dicebear.com/7.x/miniavs/svg?seed=${username}`,
-      banner:
-        'https://i0.hdslb.com/bfs/space/cb1c3ef50e22b6096fde67febe863494caefebad.png@2560w_400h_100q_1o.webp',
-      bio: '这个人很懒，什么都没有写',
-      following: 42,
-      fans: 108,
-    }
+    const { data: u } = await apiGet(`/api/users/${pid}/`, { __skipAuth: true })
+    user.value = u
 
-    const { data } = await apiGet('/api/posts/', { params: { author_username: username }, __skipAuth: true })
+    const { data } = await apiGet('/api/posts/', { params: { author__pid: pid }, __skipAuth: true })
     posts.value = unwrapList(data)
   } catch (e) {
     console.error(e)
@@ -33,20 +26,21 @@ async function loadData() {
 }
 
 onMounted(loadData)
-watch(() => route.params.username, loadData)
+watch(() => route.params.pid, loadData)
 </script>
 
 <template>
   <div v-if="user" class="space-container">
-    <div class="space-banner" :style="{ backgroundImage: `url(${user.banner})` }">
+    <div class="space-banner" :style="{ backgroundImage: user.banner_url ? `url(${user.banner_url})` : '' }">
       <div class="banner-gradient"></div>
       <div class="user-info-wrapper">
         <div class="avatar-holder">
-          <img :src="user.avatar" class="big-avatar" />
+          <img v-if="user.avatar_url" :src="user.avatar_url" class="big-avatar" />
+          <div v-else class="big-avatar placeholder"></div>
         </div>
         <div class="text-info">
           <div class="name-row">
-            <span class="name">{{ user.username }}</span>
+            <span class="name">{{ user.nickname || user.username || user.pid }}</span>
             <span class="level-tag">Lv6</span>
           </div>
           <div class="bio">{{ user.bio }}</div>
@@ -62,11 +56,11 @@ watch(() => route.params.username, loadData)
         <div class="nav-right">
           <div class="stat-box">
             <div class="stat-label">关注数</div>
-            <div class="stat-val">{{ user.following }}</div>
+            <div class="stat-val">{{ user.following_count ?? 0 }}</div>
           </div>
           <div class="stat-box">
             <div class="stat-label">粉丝数</div>
-            <div class="stat-val">{{ user.fans }}</div>
+            <div class="stat-val">{{ user.followers_count ?? 0 }}</div>
           </div>
         </div>
       </div>
@@ -128,6 +122,11 @@ watch(() => route.params.username, loadData)
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.big-avatar.placeholder {
+  width: 100%;
+  height: 100%;
+  background: #f1f2f3;
 }
 .text-info {
   margin-bottom: 30px;
