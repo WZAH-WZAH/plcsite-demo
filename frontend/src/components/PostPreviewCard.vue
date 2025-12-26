@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -16,6 +17,16 @@ const authorHandle = computed(() => {
   const u = raw.replace(/^@+/, '')
   return u ? `@${u}` : ''
 })
+
+const router = useRouter()
+
+function goToAuthor(e) {
+  e?.preventDefault?.()
+  e?.stopPropagation?.()
+  const u = String(authorUsername.value || '').replace(/^@+/, '').trim()
+  if (!u) return
+  router.push(`/u/${u}`)
+}
 </script>
 
 <template>
@@ -41,7 +52,7 @@ const authorHandle = computed(() => {
       <div v-if="meta" class="muted bili-meta">{{ meta }}</div>
 
       <div class="bili-author">
-        <span>By {{ authorHandle }}</span>
+        <button type="button" class="bili-author-link" @click="goToAuthor">By {{ authorHandle }}</button>
       </div>
     </div>
   </RouterLink>
@@ -127,5 +138,17 @@ const authorHandle = computed(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.bili-author-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.bili-author-link:hover {
+  color: #00aeec;
 }
 </style>

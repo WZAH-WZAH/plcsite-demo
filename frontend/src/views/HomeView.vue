@@ -164,7 +164,7 @@
       <div class="home-head" style="padding-bottom: 12px;">
         <div class="row" style="gap: 16px; font-size: 14px;">
           <div style="display: flex; align-items: center; gap: 4px; color: #18191c; font-weight: 600; font-size: 20px;">
-            <span style="color: #ff6699;">★</span> 热门推荐
+            <span style="font-size: 20px;">🔥</span> 热门推荐
           </div>
         </div>
         <RouterLink class="btn" style="padding: 6px 12px; font-size: 13px;" to="/boards">全部板块</RouterLink>

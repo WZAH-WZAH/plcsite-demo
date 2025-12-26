@@ -19,7 +19,7 @@ let suggestTimer = null
 
 // Canonical nav order (matches product requirement)
 // Notes:
-// - “首页 / 最近更新”是导航入口，不属于可发帖板块。
+// - “首页 / 最新动态”是导航入口，不属于可发帖板块。
 // - 板块按 slug 映射，实际数据由后端迁移确保存在。
 // - “公告/站务”放在二级导航右侧。
 const canonicalBoardSlugs = ['games', 'mmd', 'irl', 'tech', 'daily']
@@ -56,6 +56,12 @@ const meInitial = computed(() => {
   const s = n || u
   return s ? s.slice(0, 1).toUpperCase() : 'U'
 })
+
+function goToMySpace() {
+  const u = (auth.state.me?.username || '').trim()
+  if (!u) return
+  router.push(`/u/${u}`)
+}
 
 onMounted(async () => {
   boardsLoading.value = true
@@ -331,7 +337,7 @@ watch(
 
       <div class="topbar-right">
         <template v-if="auth.state.me">
-          <button type="button" class="avatar-btn" @click="openAvatarModal()" aria-label="个人中心">
+          <button type="button" class="avatar-btn" @click="goToMySpace" aria-label="我的主页">
             <img v-if="meAvatarUrl" class="avatar-img" :src="meAvatarUrl" alt="avatar" />
             <span v-else class="avatar-fallback">{{ meInitial }}</span>
           </button>
@@ -358,7 +364,7 @@ watch(
             <div class="subnav-left">
               <RouterLink class="subnav-link subnav-main" to="/">首页</RouterLink>
               <RouterLink class="subnav-link subnav-main" to="/hot">热门</RouterLink>
-              <RouterLink class="subnav-link subnav-main" to="/latest">最近更新</RouterLink>
+              <RouterLink class="subnav-link subnav-main" to="/latest">最新动态</RouterLink>
 
               <RouterLink v-for="b in canonicalBoards" :key="b.id || b.slug" class="subnav-link" :to="`/b/${b.slug}`">
                 {{ b.title || b.name }}

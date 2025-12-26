@@ -1,288 +1,100 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, onMounted, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { apiGet, unwrapList } from '../api'
-import { auth } from '../auth'
 import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
-const router = useRouter()
-
-const boards = ref([])
+const board = ref(null)
 const posts = ref([])
-const heroSlides = ref([])
-const loading = ref(false)
-const error = ref('')
+const loading = ref(true)
 
-const board = computed(() => boards.value.find((b) => b.slug === route.params.slug))
+const boardIconUrl = computed(() => board.value?.icon_url || board.value?.icon || '')
 
-const sortKey = computed(() => (route.query.sort || 'created').toString())
-const sortRange = computed(() => (route.query.range || 'week').toString())
-
-const sortOptions = [
-  { value: 'created', label: '发帖时间' },
-  { value: 'updated', label: '最后更新时间' },
-  { value: 'commented', label: '最后评论时间' },
-  { value: 'hot_week', label: '热度（周）' },
-  { value: 'hot_month', label: '热度（月）' },
-]
-
-const sortUiValue = computed(() => {
-  if (sortKey.value === 'hot') return `hot_${sortRange.value}`
-  if (sortKey.value === 'hot_week') return 'hot_week'
-  if (sortKey.value === 'hot_month') return 'hot_month'
-  return sortKey.value
-})
-
-const RIGHT_TOP_COUNT = 3
-
-const allPosts = computed(() => posts.value || [])
-const heroPostIds = computed(() => new Set((heroSlides.value || []).map((s) => s.post_id).filter(Boolean)))
-const contentPosts = computed(() => allPosts.value.filter((p) => !heroPostIds.value.has(p.id)))
-const rightTopPosts = computed(() => contentPosts.value.slice(0, RIGHT_TOP_COUNT))
-const gridPosts = computed(() => contentPosts.value.slice(RIGHT_TOP_COUNT))
-
-const heroIndex = ref(0)
-const heroCurrent = computed(() => (heroSlides.value || [])?.[heroIndex.value] || null)
-let heroTimer = null
-
-function heroNext() {
-  const n = heroSlides.value.length
-  if (n <= 1) return
-  heroIndex.value = (heroIndex.value + 1) % n
-}
-
-function heroPrev() {
-  const n = heroSlides.value.length
-  if (n <= 1) return
-  heroIndex.value = (heroIndex.value - 1 + n) % n
-}
-
-function heroGo(i) {
-  const n = heroSlides.value.length
-  if (n <= 1) return
-  const idx = Number(i)
-  if (!Number.isFinite(idx)) return
-  heroIndex.value = Math.max(0, Math.min(idx, n - 1))
-}
-
-function startHeroTimer() {
-  stopHeroTimer()
-  if (heroSlides.value.length <= 1) return
-  heroTimer = setInterval(heroNext, 5000)
-}
-
-function stopHeroTimer() {
-  if (heroTimer) {
-    clearInterval(heroTimer)
-    heroTimer = null
-  }
-}
-
-function statusText(s) {
-  if (s === 'published') return '已发布'
-  if (s === 'pending') return '待审核'
-  if (s === 'rejected') return '已拒绝'
-  return s || ''
-}
-
-function fmtDate(s) {
-  try {
-    return new Date(s).toLocaleDateString()
-  } catch {
-    return ''
-  }
-}
-
-const heroImageUrl = computed(() => {
-  const s = heroCurrent.value
-  if (!s) return ''
-  return (s.image_url || s.post_cover_image_url || '').toString()
-})
-
-const heroTitle = computed(() => {
-  const s = heroCurrent.value
-  if (!s) return ''
-  return (s.title || s.post_title || '').toString()
-})
-
-const heroDesc = computed(() => {
-  const s = heroCurrent.value
-  if (!s) return ''
-  return (s.description || '').toString()
-})
-
-async function loadBoards() {
-  const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 8000)
-  boards.value = unwrapList(data)
-}
-
-async function loadHero() {
-  heroSlides.value = []
-  heroIndex.value = 0
-  try {
-    const slug = route.params.slug
-    const { data } = await apiGet(`/api/boards/${slug}/hero/`, { __skipAuth: true }, 8000)
-    heroSlides.value = unwrapList(data)
-  } catch {
-    heroSlides.value = []
-  }
-}
-
-async function loadPosts() {
-  if (!board.value) return
+async function fetchBoard() {
   loading.value = true
-  error.value = ''
+  const slug = route.params.slug
   try {
-    const params = { board: board.value.id }
-    const sk = sortKey.value
-    if (sk === 'hot_week' || sk === 'hot_month') {
-      params.sort = 'hot'
-      params.range = sk === 'hot_month' ? 'month' : 'week'
-    } else if (sk === 'hot') {
-      params.sort = 'hot'
-      params.range = sortRange.value === 'month' ? 'month' : 'week'
-    } else {
-      params.sort = sk
-    }
-    const { data } = await apiGet('/api/posts/', { __skipAuth: true, params }, 8000)
-    posts.value = unwrapList(data)
+    const { data: boardData } = await apiGet(`/api/boards/${slug}/`, { __skipAuth: true })
+    board.value = boardData
+
+    const { data: postsData } = await apiGet(
+      '/api/posts/',
+      {
+        params: { board: boardData.id },
+        __skipAuth: true,
+      },
+      8000
+    )
+    posts.value = unwrapList(postsData)
   } catch (e) {
-    error.value = '加载帖子失败。'
+    console.error(e)
+    board.value = null
+    posts.value = []
   } finally {
     loading.value = false
   }
 }
 
-function onChangeSort(e) {
-  const v = (e?.target?.value || 'created').toString()
-  if (v === 'hot_week') {
-    router.replace({ query: { ...(route.query || {}), sort: 'hot', range: 'week' } })
-    return
-  }
-  if (v === 'hot_month') {
-    router.replace({ query: { ...(route.query || {}), sort: 'hot', range: 'month' } })
-    return
-  }
-  router.replace({ query: { ...(route.query || {}), sort: v, range: undefined } })
-}
-
-async function loadAll() {
-  loading.value = true
-  error.value = ''
-  try {
-    await loadBoards()
-    if (!board.value) {
-      error.value = '板块不存在。'
-      return
-    }
-    await Promise.all([loadHero(), loadPosts()])
-  } catch (e) {
-    error.value = '加载失败。'
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadAll)
-watch(() => route.params.slug, loadAll)
-watch(() => route.query.sort, loadPosts)
-watch(() => route.query.range, loadPosts)
-
-watch(
-  () => heroSlides.value.length,
-  () => {
-    if (heroIndex.value >= heroSlides.value.length) heroIndex.value = 0
-    startHeroTimer()
-  }
-)
-
-onMounted(() => {
-  startHeroTimer()
-})
-
-onUnmounted(() => {
-  stopHeroTimer()
-})
+watch(() => route.params.slug, fetchBoard)
+onMounted(fetchBoard)
 </script>
 
 <template>
   <div class="stack">
-    <div class="home-head">
-      <div>
-        <h2 class="home-title">{{ board?.title || '板块' }}</h2>
-        <div class="muted">{{ board?.description || '浏览与发布内容' }}</div>
+    <div class="board-header" v-if="board">
+      <div class="board-icon">
+        <img v-if="boardIconUrl" :src="boardIconUrl" alt="icon" />
+        <span v-else>#</span>
       </div>
-      <div class="row">
-        <label class="row" style="gap: 8px">
-          <span class="muted" style="font-size: 12px">排序</span>
-          <select class="btn" :value="sortUiValue" @change="onChangeSort">
-            <option v-for="o in sortOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
-        </label>
-        <RouterLink class="btn" to="/">返回</RouterLink>
-        <RouterLink
-          v-if="board?.slug !== 'announcements' || auth.state.me?.is_staff"
-          class="btn btn-primary"
-          :to="`/posts/new?board=${board?.slug || ''}`"
-        >
-          发帖
-        </RouterLink>
+      <div class="board-info">
+        <h1>{{ board.title }}</h1>
+        <p class="desc">{{ board.description || '暂无介绍' }}</p>
       </div>
     </div>
 
-    <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
-
-    <div v-if="loading" class="muted">加载中…</div>
-
-    <template v-else>
-      <!-- Top row: carousel + 3 posts -->
-      <div class="home-hero">
-        <RouterLink
-          v-if="heroCurrent"
-          class="home-hero-main"
-          :to="`/posts/${heroCurrent.post_id}`"
-          @mouseenter="stopHeroTimer"
-          @mouseleave="startHeroTimer"
-        >
-          <img v-if="heroImageUrl" :src="heroImageUrl" alt="cover" />
-          <div class="home-hero-gradient"></div>
-          <div class="home-hero-meta">
-            <div class="home-hero-main-title">{{ heroTitle || '查看详情' }}</div>
-            <div v-if="heroDesc" class="muted" style="font-size: 12px">{{ heroDesc }}</div>
-            <div class="muted" style="font-size: 12px" v-else>{{ heroCurrent.post_author_username }}</div>
-          </div>
-
-          <div v-if="heroSlides.length > 1" class="home-hero-controls" @click.prevent.stop>
-            <button type="button" class="home-hero-arrow" @click.prevent.stop="heroPrev" aria-label="上一张">‹</button>
-            <button type="button" class="home-hero-arrow" @click.prevent.stop="heroNext" aria-label="下一张">›</button>
-          </div>
-
-          <div v-if="heroSlides.length > 1" class="home-hero-dots" @click.prevent.stop>
-            <button
-              v-for="(p, i) in heroSlides"
-              :key="p.id || p.post_id"
-              type="button"
-              :class="['home-hero-dot', i === heroIndex ? 'is-active' : '']"
-              @click.prevent.stop="heroGo(i)"
-              :aria-label="`第 ${i + 1} 张`"
-            ></button>
-          </div>
-        </RouterLink>
-
-        <div v-else class="card muted" style="display: flex; align-items: center; justify-content: center">暂无帖子</div>
-
-        <div class="home-hero-grid">
-          <PostPreviewCard v-for="p in rightTopPosts" :key="p.id" :post="p" :meta="fmtDate(p.created_at)" />
-        </div>
-      </div>
-
-      <!-- Grid: 5 per row -->
-      <div class="board-grid" v-if="gridPosts.length > 0">
-        <PostPreviewCard v-for="p in gridPosts" :key="p.id" :post="p" :meta="fmtDate(p.created_at)" />
-      </div>
-
-      <div v-if="posts.length === 0" class="muted">暂无帖子</div>
-    </template>
+    <div v-if="loading" class="muted" style="margin-top: 20px">加载中...</div>
+    <div v-else-if="posts.length" class="bili-grid" style="margin-top: 20px">
+      <PostPreviewCard v-for="p in posts" :key="p.id" :post="p" />
+    </div>
+    <div v-else class="muted" style="margin-top: 20px; text-align: center; padding: 40px">该板块暂无内容</div>
   </div>
 </template>
+
+<style scoped>
+.board-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  border: 1px solid #e3e5e7;
+}
+.board-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  background: #f1f2f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 24px;
+  color: #999;
+}
+.board-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.board-info h1 {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+}
+.board-info .desc {
+  color: #9499a0;
+  font-size: 13px;
+  margin: 0;
+}
+</style>

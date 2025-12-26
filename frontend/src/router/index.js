@@ -18,9 +18,10 @@ import RegisterView from '../views/RegisterView.vue'
 import SearchPostsView from '../views/SearchPostsView.vue'
 import PostEditView from '../views/PostEditView.vue'
 import NotificationsView from '../views/NotificationsView.vue'
+import UserProfileView from '../views/UserProfileView.vue'
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     // Home page: recommendation + board rows
     { path: '/', name: 'home', component: HomeView },
@@ -44,6 +45,7 @@ const router = createRouter({
     { path: '/notifications', name: 'notifications', component: NotificationsView, meta: { requiresAuth: true } },
 
     { path: '/me', name: 'me', component: MeView, meta: { requiresAuth: true } },
+    { path: '/u/:username', name: 'user-profile', component: UserProfileView },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
 
