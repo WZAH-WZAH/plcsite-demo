@@ -112,6 +112,10 @@ api.interceptors.response.use(
       const data = await refreshPromise
       if (!data?.access) throw new Error('No access token')
       localStorage.setItem('access_token', data.access)
+      // SimpleJWT may rotate refresh tokens; persist the new refresh token if returned.
+      if (data?.refresh) {
+        localStorage.setItem('refresh_token', data.refresh)
+      }
       refreshPromise = null
 
       original.__isRetryRequest = true

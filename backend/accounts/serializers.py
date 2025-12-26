@@ -135,8 +135,6 @@ class MeSerializer(serializers.ModelSerializer):
     is_muted = serializers.BooleanField(read_only=True)
     muted_until = serializers.DateTimeField(read_only=True)
     mute_reason = serializers.CharField(read_only=True)
-    has_secondary_password = serializers.SerializerMethodField()
-    secondary_verified_recent = serializers.SerializerMethodField()
     is_staff = serializers.BooleanField(read_only=True)
     is_superuser = serializers.BooleanField(read_only=True)
 

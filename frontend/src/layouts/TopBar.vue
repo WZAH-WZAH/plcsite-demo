@@ -24,11 +24,15 @@ let suggestTimer = null
 // - “公告/站务”放在二级导航右侧。
 const canonicalBoardSlugs = ['games', 'mmd', 'irl', 'tech', 'daily']
 const canonicalBoards = computed(() => {
-  const bySlug = new Map((boards.value || []).map((b) => [b.slug, b]))
-  return canonicalBoardSlugs.map((slug) => bySlug.get(slug)).filter(Boolean)
+  const bySlug = new Map(
+    (boards.value || []).map((b) => [String(b?.slug || '').trim().toLowerCase(), b])
+  )
+  return canonicalBoardSlugs.map((slug) => bySlug.get(String(slug).toLowerCase())).filter(Boolean)
 })
 
-const bySlug = computed(() => new Map((boards.value || []).map((b) => [b.slug, b])))
+const bySlug = computed(
+  () => new Map((boards.value || []).map((b) => [String(b?.slug || '').trim().toLowerCase(), b]))
+)
 
 const announcementsBoard = computed(() => bySlug.value.get('announcements') || { slug: 'announcements', title: '公告' })
 const feedbackBoard = computed(() => bySlug.value.get('feedback') || { slug: 'feedback', title: '建议/反馈' })
@@ -56,10 +60,16 @@ const meInitial = computed(() => {
 onMounted(async () => {
   boardsLoading.value = true
   try {
-    const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 6000)
+    const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 15000)
     boards.value = unwrapList(data)
   } catch {
-    boards.value = []
+    // One retry to tolerate backend cold-start / brief network hiccups.
+    try {
+      const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 15000)
+      boards.value = unwrapList(data)
+    } catch {
+      boards.value = []
+    }
   } finally {
     boardsLoading.value = false
   }
