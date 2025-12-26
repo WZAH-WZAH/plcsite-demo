@@ -280,7 +280,8 @@ class UserSelfSerializer(serializers.ModelSerializer):
     followers_count = serializers.IntegerField(read_only=True)
     following_count = serializers.IntegerField(read_only=True)
 
-    # Only allow updating bio/banner via this endpoint.
+    # Allow updating avatar/banner via multipart/form-data.
+    avatar = serializers.ImageField(write_only=True, required=False, allow_null=True)
     banner = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     class Meta:
@@ -291,17 +292,16 @@ class UserSelfSerializer(serializers.ModelSerializer):
             'nickname',
             'email',
             'bio',
+            'avatar',
             'avatar_url',
-            'banner_url',
             'banner',
+            'banner_url',
             'followers_count',
             'following_count',
         )
         read_only_fields = (
             'pid',
             'username',
-            'nickname',
-            'email',
             'avatar_url',
             'banner_url',
             'followers_count',

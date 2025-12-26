@@ -1,14 +1,26 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { apiGet, unwrapList } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { api, apiGet, unwrapList } from '../api'
+import { auth } from '../auth'
 import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
+const router = useRouter()
 const user = ref(null)
 const posts = ref([])
 const loading = ref(true)
 const error = ref('')
+
+const bannerInput = ref(null)
+const bannerUploading = ref(false)
+
+// 判断是否是本人
+const isMe = computed(() => {
+  const mePid = String(auth.state.me?.pid || '').trim()
+  const pagePid = String(user.value?.pid || '').trim()
+  return Boolean(mePid && pagePid && mePid === pagePid)
+})
 
 async function loadData() {
   loading.value = true
@@ -18,6 +30,10 @@ async function loadData() {
 
   const pid = String(route.params.pid || '').trim()
   try {
+    if (auth.isAuthed() && !auth.state.me && !auth.state.loading) {
+      await auth.loadMe()
+    }
+
     if (!pid) {
       error.value = '缺少用户 PID。'
       return
@@ -37,14 +53,66 @@ async function loadData() {
   }
 }
 
+function goToSettings() {
+  router.push('/me')
+}
+
+function triggerBannerUpload() {
+  if (!isMe.value) return
+  bannerInput.value?.click?.()
+}
+
+async function onBannerChange(e) {
+  const file = e?.target?.files?.[0]
+  if (!file) return
+  bannerUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('banner', file)
+    const { data } = await api.patch('/api/users/me/', fd)
+    // 只更新当前页面的 banner_url
+    if (user.value) user.value.banner_url = data?.banner_url || user.value.banner_url
+    await auth.loadMe()
+    alert('头图更新成功')
+  } catch (e2) {
+    alert(e2?.response?.data?.detail || '头图上传失败')
+  } finally {
+    bannerUploading.value = false
+    if (e?.target) e.target.value = ''
+  }
+}
+
 onMounted(loadData)
 watch(() => route.params.pid, loadData)
 </script>
 
 <template>
   <div v-if="user" class="space-container">
-    <div class="space-banner" :style="{ backgroundImage: user.banner_url ? `url(${user.banner_url})` : '' }">
+    <div
+      class="space-banner"
+      :style="{ backgroundImage: user.banner_url ? `url(${user.banner_url})` : '' }"
+    >
       <div class="banner-gradient"></div>
+
+      <button
+        v-if="isMe"
+        class="edit-banner-btn"
+        type="button"
+        :disabled="bannerUploading"
+        @click.stop="triggerBannerUpload"
+      >
+        📷 {{ bannerUploading ? '上传中...' : '更换头图' }}
+      </button>
+
+      <input
+        v-if="isMe"
+        ref="bannerInput"
+        type="file"
+        hidden
+        accept="image/*"
+        @change="onBannerChange"
+      />
+
       <div class="user-info-wrapper">
         <div class="avatar-holder">
           <img v-if="user.avatar_url" :src="user.avatar_url" class="big-avatar" />
@@ -56,6 +124,11 @@ watch(() => route.params.pid, loadData)
             <span class="level-tag">Lv6</span>
           </div>
           <div class="bio">{{ user.bio }}</div>
+        </div>
+
+        <div class="action-area">
+          <button v-if="isMe" class="btn-edit" type="button" @click="goToSettings">编辑资料</button>
+          <button v-else class="btn-follow" type="button" disabled>+ 关注</button>
         </div>
       </div>
     </div>
@@ -129,9 +202,10 @@ watch(() => route.params.pid, loadData)
 
 /* Banner */
 .space-banner {
-  height: 200px;
+  height: 240px;
   background-size: cover;
   background-position: center;
+  background-color: #f1f2f3;
   position: relative;
   display: flex;
   align-items: flex-end;
@@ -175,6 +249,7 @@ watch(() => route.params.pid, loadData)
   margin-bottom: 30px;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  flex: 1;
 }
 .name-row {
   display: flex;
@@ -195,6 +270,65 @@ watch(() => route.params.pid, loadData)
 .bio {
   font-size: 13px;
   opacity: 0.9;
+}
+
+.edit-banner-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.space-banner:hover .edit-banner-btn {
+  opacity: 1;
+}
+
+.edit-banner-btn:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.action-area {
+  margin-bottom: 30px;
+}
+
+.btn-edit,
+.btn-follow {
+  padding: 6px 24px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-edit {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.btn-edit:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.btn-follow {
+  background: #00aeec;
+  color: #fff;
+}
+
+.btn-follow:disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
 }
 
 /* Nav Bar */
