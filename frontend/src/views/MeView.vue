@@ -6,14 +6,13 @@ import { auth } from '../auth'
 
 const router = useRouter()
 
-const user = ref({})
+const user = ref(auth.state.me ? { ...auth.state.me } : {})
 const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
 const error = ref('')
 
 const avatarInput = ref(null)
-const bannerInput = ref(null)
 
 const meInitial = computed(() => {
   const base = String(user.value?.nickname || user.value?.username || '').trim()
@@ -26,6 +25,7 @@ async function load() {
   try {
     const { data } = await api.get('/api/users/me/')
     user.value = data
+    await auth.loadMe()
   } catch (e) {
     error.value = e?.response?.data?.detail || '加载失败，请先登录。'
   } finally {
@@ -33,7 +33,6 @@ async function load() {
   }
 }
 
-// 统一保存文本信息
 async function saveProfile() {
   saving.value = true
   error.value = ''
@@ -46,7 +45,7 @@ async function saveProfile() {
     const { data } = await api.patch('/api/users/me/', payload)
     user.value = data
     await auth.loadMe()
-    alert('保存成功')
+    alert('个人资料已更新')
   } catch (e) {
     const msg = e?.response?.data
     error.value =
@@ -60,26 +59,27 @@ async function saveProfile() {
   }
 }
 
-// 图片上传（头像/头图）
-async function handleImageUpload(event, type) {
-  const file = event?.target?.files?.[0]
+function triggerAvatar() {
+  avatarInput.value?.click?.()
+}
+
+async function handleAvatarChange(e) {
+  const file = e?.target?.files?.[0]
   if (!file) return
   uploading.value = true
   error.value = ''
-
-  const formData = new FormData()
-  formData.append(type, file)
-
   try {
-    const { data } = await api.patch('/api/users/me/', formData)
+    const fd = new FormData()
+    fd.append('avatar', file)
+    const { data } = await api.patch('/api/users/me/', fd)
     user.value = data
     await auth.loadMe()
-    alert((type === 'avatar' ? '头像' : '头图') + '更新成功')
-  } catch (e) {
-    error.value = e?.response?.data?.detail || '图片上传失败'
+    alert('头像更换成功')
+  } catch (err) {
+    error.value = err?.response?.data?.detail || '图片上传失败'
   } finally {
     uploading.value = false
-    if (event?.target) event.target.value = ''
+    if (e?.target) e.target.value = ''
   }
 }
 
@@ -89,7 +89,7 @@ function handleLogout() {
   router.push('/login')
 }
 
-function backToProfile() {
+function viewMyPage() {
   const pid = String(user.value?.pid || auth.state.me?.pid || '').trim()
   if (!pid) return
   router.push(`/u/${pid}`)
@@ -99,87 +99,69 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="settings-page">
-    <div class="settings-container">
-      <div class="settings-header">
+  <div class="settings-layout">
+    <div class="settings-box">
+      <div class="s-header">
         <h2>账号设置</h2>
-        <button class="btn btn-ghost" type="button" @click="backToProfile">返回个人主页 ›</button>
+        <a class="back-link" @click="viewMyPage">返回个人空间 &gt;</a>
       </div>
 
       <div v-if="error" class="error">{{ error }}</div>
-      <div v-if="loading" class="muted">加载中...</div>
+      <div v-if="loading" class="loading-txt">加载中...</div>
 
-      <div v-else class="settings-form">
-        <div class="form-section">
-          <h3>形象设置</h3>
-          <div class="visual-edit">
-            <div class="avatar-edit" @click="avatarInput?.click()">
-              <img v-if="user.avatar_url" :src="user.avatar_url" alt="avatar" />
-              <div v-else class="avatar-fallback">{{ meInitial }}</div>
-              <div class="mask">修改头像</div>
-              <input
-                type="file"
-                ref="avatarInput"
-                hidden
-                accept="image/*"
-                @change="(e) => handleImageUpload(e, 'avatar')"
-              />
-            </div>
-
-            <div
-              class="banner-edit"
-              :style="{ backgroundImage: user.banner_url ? `url(${user.banner_url})` : '' }"
-              @click="bannerInput?.click()"
-            >
-              <div class="banner-mask">点击修改个人空间头图</div>
-              <input
-                type="file"
-                ref="bannerInput"
-                hidden
-                accept="image/*"
-                @change="(e) => handleImageUpload(e, 'banner')"
-              />
-            </div>
+      <div v-else class="s-form">
+        <div class="form-row avatar-row">
+          <label>当前头像</label>
+          <div class="avatar-edit" @click="triggerAvatar">
+            <img v-if="user.avatar_url" :src="user.avatar_url" alt="avatar" />
+            <div v-else class="avatar-fallback">{{ meInitial }}</div>
+            <div class="edit-mask">{{ uploading ? '上传中...' : '修改' }}</div>
+            <input type="file" ref="avatarInput" hidden @change="handleAvatarChange" accept="image/*" />
+          </div>
+          <div class="avatar-tip">
+            支持 jpg, png 格式，大小不超过 20MB<br />
+            点击头像即可直接更换
           </div>
         </div>
 
-        <div class="form-section">
-          <h3>基本信息</h3>
+        <div class="divider"></div>
 
-          <div class="form-group">
-            <label>用户ID (PID)</label>
-            <div class="static-val">{{ user.pid }}</div>
-          </div>
-
-          <div class="form-group">
-            <label>登录用户名</label>
-            <div class="static-val">{{ user.username }} <span class="badge">不可修改</span></div>
-          </div>
-
-          <div class="form-group">
-            <label>昵称</label>
-            <input v-model="user.nickname" class="input" placeholder="设置一个好听的昵称" />
-          </div>
-
-          <div class="form-group">
-            <label>个性签名</label>
-            <textarea v-model="user.bio" class="input textarea" placeholder="介绍一下自己..." rows="3"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label>邮箱</label>
-            <input v-model="user.email" class="input" placeholder="example@email.com" />
+        <div class="form-row">
+          <label>昵称</label>
+          <div class="input-wrap">
+            <input v-model="user.nickname" type="text" class="bili-input" placeholder="请输入昵称" />
           </div>
         </div>
 
-        <div class="form-actions">
-          <button class="btn btn-primary" type="button" :disabled="saving || uploading" @click="saveProfile">
-            {{ saving ? '保存中...' : '保存更改' }}
+        <div class="form-row">
+          <label>用户名</label>
+          <div class="static-text">
+            {{ user.username }} <span class="tag">UID: {{ user.pid }}</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>个性签名</label>
+          <div class="input-wrap">
+            <textarea v-model="user.bio" class="bili-input area" placeholder="设置您的签名"></textarea>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>邮箱</label>
+          <div class="input-wrap">
+            <input v-model="user.email" type="email" class="bili-input" />
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="footer-btns">
+          <button class="btn-save" type="button" @click="saveProfile" :disabled="saving || uploading">
+            {{ saving ? '保存中...' : '保存设置' }}
           </button>
 
-          <div class="danger-zone">
-            <button class="btn btn-danger" type="button" @click="handleLogout">退出登录</button>
-          </div>
+          <button class="btn-logout" type="button" @click="handleLogout">退出登录</button>
         </div>
       </div>
     </div>
@@ -187,43 +169,51 @@ onMounted(load)
 </template>
 
 <style scoped>
-.settings-page {
-  background: #f6f7f8;
+.settings-layout {
+  background: #f4f5f7;
   min-height: 100vh;
-  padding: 40px 20px;
+  padding-top: 30px;
+  padding-left: 16px;
+  padding-right: 16px;
 }
 
-.settings-container {
+.settings-box {
   max-width: 800px;
   margin: 0 auto;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
-  padding: 40px;
+  border-radius: 4px;
+  border: 1px solid #e1e2e5;
+  padding: 30px 40px;
 }
 
-.settings-header {
+.s-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #eee;
   padding-bottom: 20px;
+  border-bottom: 1px solid #e5e9ef;
   margin-bottom: 30px;
 }
 
-.settings-header h2 {
+.s-header h2 {
+  font-size: 20px;
+  color: #333;
   margin: 0;
-  font-size: 24px;
 }
 
-.form-section {
-  margin-bottom: 40px;
+.back-link {
+  font-size: 14px;
+  color: #00aeec;
+  cursor: pointer;
 }
 
-.form-section h3 {
-  font-size: 16px;
-  margin-bottom: 20px;
-  color: #111827;
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.loading-txt {
+  color: #6d757a;
+  padding: 12px 0;
 }
 
 .error {
@@ -235,11 +225,19 @@ onMounted(load)
   color: #991b1b;
 }
 
-/* 形象编辑 */
-.visual-edit {
+.form-row {
   display: flex;
-  gap: 20px;
-  align-items: center;
+  margin-bottom: 24px;
+}
+
+.form-row label {
+  width: 90px;
+  text-align: right;
+  margin-right: 20px;
+  font-size: 14px;
+  color: #222;
+  padding-top: 10px;
+  font-weight: 700;
 }
 
 .avatar-edit {
@@ -249,8 +247,7 @@ onMounted(load)
   overflow: hidden;
   position: relative;
   cursor: pointer;
-  flex-shrink: 0;
-  border: 1px solid #eee;
+  border: 1px solid #e5e9ef;
   background: #fff;
   display: flex;
   align-items: center;
@@ -264,11 +261,18 @@ onMounted(load)
 }
 
 .avatar-fallback {
+  width: 100%;
+  height: 100%;
+  background: #f1f2f3;
+  color: #6d757a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
   font-weight: 800;
-  color: #111827;
 }
 
-.mask {
+.edit-mask {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
@@ -281,136 +285,102 @@ onMounted(load)
   font-size: 12px;
 }
 
-.avatar-edit:hover .mask {
+.avatar-edit:hover .edit-mask {
   opacity: 1;
 }
 
-.banner-edit {
+.avatar-tip {
+  font-size: 12px;
+  color: #99a2aa;
+  margin-left: 20px;
+  padding-top: 10px;
+  line-height: 1.5;
+}
+
+.input-wrap {
   flex: 1;
-  height: 80px;
-  border-radius: 8px;
-  background-color: #f1f2f3;
-  background-size: cover;
-  background-position: center;
-  position: relative;
-  cursor: pointer;
-  overflow: hidden;
+  max-width: 400px;
 }
 
-.banner-mask {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.banner-edit:hover .banner-mask {
-  opacity: 1;
-}
-
-/* 表单项 */
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #374151;
-}
-
-.input {
+.bili-input {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
+  padding: 10px;
+  border: 1px solid #e5e9ef;
+  border-radius: 4px;
   font-size: 14px;
-  transition: border-color 0.2s;
-}
-
-.input:focus {
-  border-color: #00aeec;
+  color: #222;
   outline: none;
+  transition: border 0.2s;
 }
 
-.textarea {
+.bili-input:focus {
+  border-color: #00aeec;
+}
+
+.area {
+  height: 80px;
   resize: vertical;
 }
 
-.static-val {
+.static-text {
+  padding-top: 10px;
+  color: #6d757a;
   font-size: 14px;
-  color: #6b7280;
-  padding: 10px 0;
 }
 
-.badge {
-  background: #f3f4f6;
-  color: #9ca3af;
-  font-size: 12px;
+.tag {
+  background: #f4f5f7;
+  color: #99a2aa;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 3px;
+  font-size: 12px;
   margin-left: 8px;
 }
 
-/* 按钮 */
-.form-actions {
+.divider {
+  height: 1px;
+  background: #e5e9ef;
+  margin: 30px 0;
+}
+
+.footer-btns {
+  padding-left: 110px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 40px;
-  padding-top: 20px;
-  border-top: 1px solid #eee;
+  gap: 20px;
 }
 
-.btn {
-  padding: 10px 24px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s;
-}
-
-.btn-primary {
+.btn-save {
+  width: 120px;
+  height: 36px;
   background: #00aeec;
   color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
 }
 
-.btn-primary:hover {
-  background: #009cd6;
+.btn-save:hover {
+  background: #00a1d6;
 }
 
-.btn-primary:disabled {
-  opacity: 0.6;
+.btn-save:disabled {
+  background: #ccc;
   cursor: not-allowed;
 }
 
-.btn-ghost {
-  background: transparent;
-  color: #00aeec;
-  padding: 0;
+.btn-logout {
+  width: 120px;
+  height: 36px;
+  background: #ffeded;
+  color: #ff5050;
+  border: 1px solid #ffcccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
 }
 
-.btn-ghost:hover {
-  text-decoration: underline;
-}
-
-.btn-danger {
-  background: #fee2e2;
-  color: #ef4444;
-}
-
-.btn-danger:hover {
-  background: #fecaca;
+.btn-logout:hover {
+  background: #ffcccc;
 }
 </style>
