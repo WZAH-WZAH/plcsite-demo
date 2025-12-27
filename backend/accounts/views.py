@@ -890,3 +890,18 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
 
         followers_count = UserFollow.objects.filter(following_id=target.id).count()
         return Response({'following': following, 'followers_count': followers_count}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='recommended')
+    def recommended(self, request):
+        """Recommended users for sidebar.
+
+        Simple + stable: top users by followers_count.
+        """
+
+        qs = self.get_queryset().filter(is_active=True)
+        if request.user and request.user.is_authenticated:
+            qs = qs.exclude(id=request.user.id)
+
+        qs = qs.order_by('-followers_count', 'id')[:5]
+        ser = self.get_serializer(qs, many=True, context={'request': request})
+        return Response(ser.data, status=status.HTTP_200_OK)

@@ -16,6 +16,7 @@ from django.utils.decorators import method_decorator
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -124,8 +125,38 @@ class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.select_related('board', 'author', 'reviewed_by').prefetch_related('resource__links')
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsAuthorOrStaffOrReadOnly]
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = ['board', 'author__pid']
+    search_fields = ['title', 'body', 'author__nickname', 'author__username']
+
+    @action(detail=False, methods=['get'])
+    def trending(self, request):
+        """Simple trending posts for sidebar.
+
+        No tag/topic system yet; frontend treats title as topic label.
+        """
+
+        seven_days_ago = timezone.now() - timedelta(days=7)
+        qs = (
+            Post.objects.filter(
+                created_at__gte=seven_days_ago,
+                status=Post.Status.PUBLISHED,
+                is_deleted=False,
+            )
+            .annotate(likes_count=Count('likes', distinct=True))
+            .annotate(hotness=F('views_count') + F('likes_count') * 5)
+            .order_by('-hotness', '-views_count', '-created_at')
+        )[:5]
+
+        data = [
+            {
+                'id': p.id,
+                'title': p.title,
+                'views_count': int(getattr(p, 'views_count', 0) or 0),
+            }
+            for p in qs
+        ]
+        return Response(data, status=status.HTTP_200_OK)
 
     @method_decorator(ratelimit(key='user_or_ip', rate='5/m', method='POST', block=False))
     def create(self, request, *args, **kwargs):
