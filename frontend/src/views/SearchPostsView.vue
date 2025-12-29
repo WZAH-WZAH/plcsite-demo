@@ -1,193 +1,292 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../api'
-import { auth } from '../auth'
+import { apiGet, unwrapList } from '../api'
 import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const q = computed(() => (route.query.q || '').toString().trim())
-
 const posts = ref([])
-const facets = ref({ board_slug: {}, author_username: {} })
 const loading = ref(false)
-const error = ref('')
+const keyword = ref((route.query.q || '').toString())
 
-// -----------------
-// Highlight helpers
-// -----------------
-// We intentionally do NOT render any HTML returned by the backend/search engine.
-// Instead, we escape text and insert our own <mark> tags based on match positions.
-function escapeHtml(s) {
-  return (s || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
+const boards = ref([])
 
-function renderWithMatches(text, matches) {
-  const raw = (text || '').toString()
-  const ranges = []
-  // Meilisearch returns: _matchesPosition: { title: [{start,length}], body: [...] }
-  if (Array.isArray(matches)) {
-    for (const m of matches) {
-      const s = Number(m?.start)
-      const l = Number(m?.length)
-      if (Number.isFinite(s) && Number.isFinite(l) && l > 0) ranges.push([s, s + l])
-    }
-  }
-  if (ranges.length === 0) return escapeHtml(raw)
+// 筛选状态
+const filters = ref({
+  ordering: '',
+  board: '',
+})
 
-  ranges.sort((a, b) => a[0] - b[0])
-  // Merge overlaps
-  const merged = []
-  for (const r of ranges) {
-    const last = merged[merged.length - 1]
-    if (!last || r[0] > last[1]) merged.push(r)
-    else last[1] = Math.max(last[1], r[1])
-  }
+const sortOptions = [
+  { label: '综合排序', value: '' },
+  { label: '最新发布', value: '-created_at' },
+  { label: '最多播放', value: '-views_count' },
+  { label: '最多点赞', value: '-likes_count' },
+]
 
-  let out = ''
-  let cursor = 0
-  for (const [s, e] of merged) {
-    const ss = Math.max(0, Math.min(s, raw.length))
-    const ee = Math.max(0, Math.min(e, raw.length))
-    if (ss > cursor) out += escapeHtml(raw.slice(cursor, ss))
-    out += `<mark>${escapeHtml(raw.slice(ss, ee))}</mark>`
-    cursor = ee
-  }
-  if (cursor < raw.length) out += escapeHtml(raw.slice(cursor))
-  return out
-}
-
-function getTitleHtml(p) {
-  const mp = p?._matchesPosition
-  const matches = mp?.title
-  return renderWithMatches(p?.title || '', matches)
-}
-
-function statusText(s) {
-  if (s === 'published') return '已发布'
-  if (s === 'pending') return '待审核'
-  if (s === 'rejected') return '已拒绝'
-  return s || ''
-}
-
-function fmtTime(s) {
+async function loadBoards() {
   try {
-    return new Date(s).toLocaleString()
+    const { data } = await apiGet('/api/boards/', { __skipAuth: true }, 8000)
+    boards.value = unwrapList(data)
   } catch {
-    return ''
+    boards.value = []
   }
 }
 
-function resultMeta(p) {
-  const created = p?.created_at ? `创建：${fmtTime(p.created_at)}` : ''
-  const updated = p?.updated_at ? `最后编辑：${fmtTime(p.updated_at)}` : ''
-  const st = auth.state.me ? statusText(p?.status) : ''
-  return [created, updated, st].filter(Boolean).join(' · ')
+function buildQuery() {
+  const q = String(keyword.value || '').trim()
+  const ordering = String(filters.value.ordering || '').trim()
+  const board = String(filters.value.board || '').trim()
+  const query = {}
+  if (q) query.q = q
+  if (ordering) query.ordering = ordering
+  if (board) query.board = board
+  return query
 }
 
-async function load() {
+function onSearchSubmit() {
+  router.push({ path: '/search', query: buildQuery() })
+}
+
+function changeSort(val) {
+  filters.value.ordering = val
+  onSearchSubmit()
+}
+
+function changeBoard(val) {
+  filters.value.board = val
+  onSearchSubmit()
+}
+
+async function doSearch() {
+  const q = String(keyword.value || '').trim()
+  const ordering = String(filters.value.ordering || '').trim()
+  const board = String(filters.value.board || '').trim()
+
+  // 没关键词也没分区时，不请求。
+  if (!q && !board) {
+    posts.value = []
+    return
+  }
+
   loading.value = true
-  error.value = ''
   try {
-    if (!q.value) {
-      posts.value = []
-      facets.value = { board_slug: {}, author_username: {} }
-      return
+    const params = {
+      search: q || undefined,
+      ordering: ordering || undefined,
+      board: board || undefined,
     }
-    const { data } = await api.get('/api/posts/search/', { params: { q: q.value, limit: 50, offset: 0 } })
-    posts.value = Array.isArray(data?.hits) ? data.hits : []
-    facets.value = data?.facets || { board_slug: {}, author_username: {} }
-  } catch (e) {
-    error.value = '搜索失败。'
+    const { data } = await apiGet('/api/posts/', { params, __skipAuth: true })
+    posts.value = unwrapList(data)
   } finally {
     loading.value = false
   }
 }
 
-function clearSearch() {
-  router.replace({ name: 'search', query: {} })
-}
+watch(
+  () => route.query,
+  (newQuery) => {
+    keyword.value = (newQuery.q || '').toString()
+    filters.value.ordering = (newQuery.ordering || '').toString()
+    filters.value.board = (newQuery.board || '').toString()
+    doSearch()
+  },
+  { immediate: true }
+)
 
-function applyFacet(kind, value) {
-  if (!value) return
-  const cur = q.value || ''
-  const token = `${kind}:${value}`
-  const next = cur.includes(token) ? cur : (cur ? `${cur} ${token}` : token)
-  router.push({ name: 'search', query: next ? { q: next } : {} })
-}
-
-onMounted(load)
-watch(() => route.query.q, load)
+onMounted(loadBoards)
 </script>
 
 <template>
-  <div class="stack">
-    <div class="card">
-      <div class="row" style="justify-content: space-between">
-        <div>
-          <h2 style="margin: 0 0 6px">搜索</h2>
-          <div class="muted">关键词：{{ q || '（空）' }}</div>
-        </div>
-        <div class="row">
-          <RouterLink class="btn" to="/">返回</RouterLink>
-          <button v-if="q" class="btn" type="button" @click="clearSearch">清空</button>
-        </div>
+  <div class="search-page">
+    <div class="search-header">
+      <div class="search-input-wrap">
+        <input v-model="keyword" @keyup.enter="onSearchSubmit" type="text" placeholder="请输入关键词搜索..." />
+        <button class="btn-search" type="button" @click="onSearchSubmit">搜索</button>
       </div>
     </div>
 
-    <div v-if="error" class="card" style="border-color: #fecaca; background: #fff1f2">{{ error }}</div>
+    <div class="filter-bar">
+      <ul class="filter-tabs">
+        <li
+          v-for="opt in sortOptions"
+          :key="opt.value"
+          :class="{ active: filters.ordering === opt.value }"
+          @click="changeSort(opt.value)"
+        >
+          {{ opt.label }}
+        </li>
+      </ul>
 
-    <div v-if="loading" class="muted">加载中…</div>
+      <div class="filter-extra">
+        <select class="board-select" :value="filters.board" @change="changeBoard($event.target.value)">
+          <option value="">全部分区</option>
+          <option v-for="b in boards" :key="b.id" :value="String(b.id)">{{ b.title }}</option>
+        </select>
+      </div>
+    </div>
 
-    <div v-else class="stack">
-      <div v-if="q" class="card stack">
-        <div class="muted" style="font-size: 12px">聚合</div>
-        <div class="row" style="flex-wrap: wrap">
-          <span class="muted" style="min-width: 60px">板块：</span>
-          <button
-            v-for="(c, slug) in (facets.board_slug || {})"
-            :key="`b-${slug}`"
-            class="btn"
-            type="button"
-            @click="applyFacet('board', slug)"
-          >
-            {{ slug }} ({{ c }})
-          </button>
-        </div>
-        <div class="row" style="flex-wrap: wrap">
-          <span class="muted" style="min-width: 60px">作者：</span>
-          <button
-            v-for="(c, u) in (facets.author_username || {})"
-            :key="`u-${u}`"
-            class="btn"
-            type="button"
-            @click="applyFacet('author', u)"
-          >
-            {{ u }} ({{ c }})
-          </button>
-        </div>
-        <div class="muted" style="font-size: 12px">
-          高级搜索示例：<span>board:tools author:alice status:published is:locked</span>
-        </div>
+    <div class="search-body">
+      <div v-if="loading" class="state-text">搜索中...</div>
+
+      <div v-else-if="posts.length > 0" class="bili-grid">
+        <PostPreviewCard v-for="p in posts" :key="p.id" :post="p" />
       </div>
 
-      <PostPreviewCard
-        v-for="p in posts"
-        :key="p.id"
-        :post="p"
-        :titleHtml="getTitleHtml(p)"
-        :meta="resultMeta(p)"
-      />
-
-      <div v-if="q && posts.length === 0" class="muted">没有匹配结果</div>
-      <div v-if="!q" class="muted">在顶部输入关键词开始搜索</div>
+      <div v-else class="state-text empty">
+        <p>没有找到相关内容</p>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.search-page {
+  min-height: 100vh;
+  background: #fff;
+}
+
+/* 顶部搜索区 */
+.search-header {
+  background: #f1f2f3;
+  padding: 30px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.search-input-wrap {
+  display: flex;
+  width: 600px;
+  background: #fff;
+  border-radius: 4px;
+  border: 1px solid #e3e5e7;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.search-input-wrap:focus-within {
+  border-color: #00aeec;
+}
+
+.search-input-wrap input {
+  flex: 1;
+  border: none;
+  padding: 12px 16px;
+  font-size: 16px;
+  outline: none;
+}
+
+.btn-search {
+  width: 100px;
+  background: #00aeec;
+  color: #fff;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-search:hover {
+  background: #009cd6;
+}
+
+/* 筛选条 */
+.filter-bar {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+  border-bottom: 1px solid #e3e5e7;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.filter-tabs {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.filter-tabs li {
+  font-size: 14px;
+  color: #61666d;
+  cursor: pointer;
+  padding: 4px 0;
+  position: relative;
+}
+
+.filter-tabs li.active {
+  color: #00aeec;
+  font-weight: 600;
+}
+
+.filter-tabs li.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  height: 2px;
+  background: #00aeec;
+}
+
+.filter-tabs li:hover {
+  color: #00aeec;
+}
+
+.board-select {
+  height: 34px;
+  border: 1px solid #e3e5e7;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fff;
+  color: #18191c;
+}
+
+/* 结果列表 */
+.search-body {
+  max-width: 1100px;
+  margin: 20px auto;
+  padding: 0 20px;
+}
+
+.state-text {
+  text-align: center;
+  padding: 60px;
+  color: #999;
+}
+
+.bili-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+@media (max-width: 980px) {
+  .search-input-wrap {
+    width: calc(100% - 40px);
+  }
+
+  .bili-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .filter-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bili-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
