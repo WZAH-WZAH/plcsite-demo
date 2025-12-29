@@ -518,9 +518,9 @@ watch(
 
     <!-- Global message modal (reuses existing modal style) -->
     <div v-if="ui.modalOpen" class="modal-backdrop" @click.self="ui.closeModal()">
-      <div class="modal card" role="dialog" aria-modal="true" :aria-label="ui.modalTitle || '提示'">
-        <div class="row" style="justify-content: space-between">
-          <div style="font-weight: 800">{{ ui.modalTitle || '提示' }}</div>
+      <div class="modal modal-auto card" role="dialog" aria-modal="true" :aria-label="ui.modalTitle || '提示'">
+        <div class="modal-head">
+          <div class="modal-title">{{ ui.modalTitle || '提示' }}</div>
           <button type="button" class="modal-close" aria-label="关闭" @click="ui.closeModal()">×</button>
         </div>
         <div class="modal-message" style="margin-top: 12px">{{ ui.modalMessage }}</div>

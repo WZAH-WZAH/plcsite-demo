@@ -243,7 +243,30 @@ a {
   width: min(520px, 100%);
 }
 
+/* Auto-width modal variant (shrink to fit content, keep max width) */
+.modal.modal-auto {
+  width: fit-content;
+  max-width: min(520px, 100%);
+}
+
+.modal-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 40px;
+}
+
+.modal-title {
+  font-weight: 800;
+  text-align: center;
+  flex: 0 1 auto;
+}
+
 .modal-close {
+  position: absolute;
+  top: 0;
+  right: 0;
   width: 32px;
   height: 32px;
   border-radius: 999px;
@@ -268,7 +291,7 @@ a {
   white-space: pre-wrap;
   color: #111827;
   font-size: 16px;
-  padding: 10px 6px;
+  padding: 6px 6px 2px;
 }
 
 .avatar-preview {

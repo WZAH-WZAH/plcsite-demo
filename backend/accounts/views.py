@@ -4,7 +4,9 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.utils import timezone
 from django.core.cache import cache
-from django.db.models import BooleanField, Count, Exists, OuterRef, Value
+from datetime import timedelta
+
+from django.db.models import BooleanField, Count, Exists, OuterRef, Q, Value
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.pagination import PageNumberPagination
@@ -909,13 +911,70 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
     def recommended(self, request):
         """Recommended users for sidebar.
 
-        Simple + stable: top users by followers_count.
+        Rules:
+        - If user is authenticated and follows >= 5 users:
+          recommend users by common tags in followed users' posts.
+        - Otherwise: simple + stable fallback: top users by followers_count.
         """
 
-        qs = self.get_queryset().filter(is_active=True)
-        if request.user and request.user.is_authenticated:
-            qs = qs.exclude(id=request.user.id)
+        base_qs = self.get_queryset().filter(is_active=True)
+        me = request.user if (request.user and request.user.is_authenticated) else None
+        if me is not None:
+            base_qs = base_qs.exclude(id=me.id)
 
-        qs = qs.order_by('-followers_count', 'id')[:5]
-        ser = self.get_serializer(qs, many=True, context={'request': request})
+        # Default: top by followers_count.
+        def fallback(exclude_ids=None):
+            qs = base_qs
+            if exclude_ids:
+                qs = qs.exclude(id__in=list(exclude_ids))
+            return qs.order_by('-followers_count', 'id')[:5]
+
+        # Tag-based recommendation for users with a meaningful following graph.
+        if me is not None:
+            followed_ids_qs = UserFollow.objects.filter(follower_id=me.id).values_list('following_id', flat=True)
+            followed_count = UserFollow.objects.filter(follower_id=me.id).count()
+
+            if followed_count >= 5:
+                try:
+                    from forum.models import Post, Tag
+
+                    since = timezone.now() - timedelta(days=180)
+                    top_tag_names = list(
+                        Tag.objects.filter(
+                            posts__status=Post.Status.PUBLISHED,
+                            posts__is_deleted=False,
+                            posts__author_id__in=followed_ids_qs,
+                            posts__created_at__gte=since,
+                        )
+                        .annotate(cnt=Count('posts', distinct=True))
+                        .order_by('-cnt', 'name')
+                        .values_list('name', flat=True)[:5]
+                    )
+
+                    if top_tag_names:
+                        tag_post_filter = Q(
+                            posts__status=Post.Status.PUBLISHED,
+                            posts__is_deleted=False,
+                            posts__created_at__gte=since,
+                            posts__tags__name__in=top_tag_names,
+                        )
+
+                        cand = (
+                            base_qs.exclude(id__in=followed_ids_qs)
+                            .annotate(tag_score=Count('posts', filter=tag_post_filter, distinct=True))
+                            .filter(tag_score__gt=0)
+                            .order_by('-tag_score', '-followers_count', 'id')
+                        )
+
+                        items = list(cand[:5])
+                        if len(items) < 5:
+                            extra = list(fallback(exclude_ids=set([u.id for u in items]) | set(followed_ids_qs)))
+                            items = (items + extra)[:5]
+                        ser = self.get_serializer(items, many=True, context={'request': request})
+                        return Response(ser.data, status=status.HTTP_200_OK)
+                except Exception:
+                    # Never break sidebar if recommendation logic fails.
+                    pass
+
+        ser = self.get_serializer(fallback(), many=True, context={'request': request})
         return Response(ser.data, status=status.HTTP_200_OK)
