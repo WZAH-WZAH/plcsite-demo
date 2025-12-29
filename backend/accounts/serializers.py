@@ -253,6 +253,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
     banner_url = serializers.SerializerMethodField()
     followers_count = serializers.IntegerField(read_only=True)
     following_count = serializers.IntegerField(read_only=True)
+    is_following = serializers.BooleanField(read_only=True, required=False, default=False)
 
     class Meta:
         model = User
@@ -265,6 +266,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
             'banner_url',
             'followers_count',
             'following_count',
+            'is_following',
         )
 
     def get_avatar_url(self, obj) -> str:

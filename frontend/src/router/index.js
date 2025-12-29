@@ -10,6 +10,7 @@ import BoardsView from '../views/BoardsView.vue'
 import HomeView from '../views/HomeView.vue'
 import HotView from '../views/HotView.vue'
 import LatestView from '../views/LatestView.vue'
+import FollowingView from '../views/FollowingView.vue'
 import LoginView from '../views/LoginView.vue'
 import MeView from '../views/MeView.vue'
 import PostDetailView from '../views/PostDetailView.vue'
@@ -32,6 +33,9 @@ const router = createRouter({
 
     // Latest updates feed
     { path: '/latest', name: 'latest', component: LatestView },
+
+    // Following feed
+    { path: '/following', name: 'following', component: FollowingView, meta: { requiresAuth: true } },
 
     // Boards list
     { path: '/boards', name: 'boards', component: BoardsView },

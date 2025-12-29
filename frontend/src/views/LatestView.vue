@@ -1,8 +1,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiGet, unwrapList } from '../api'
+import { api, apiGet, unwrapList } from '../api'
 import TimelineItem from '../components/TimelineItem.vue'
+import { auth } from '../auth'
+import { ui } from '../ui'
 
 const router = useRouter()
 
@@ -15,6 +17,7 @@ const sidebarError = ref('')
 // 后端数据
 const hotTopics = ref([])
 const recUsers = ref([])
+const followBusyPid = ref('')
 
 const searchQuery = ref('')
 
@@ -38,7 +41,7 @@ onMounted(async () => {
   try {
     const [trendingResp, recommendedResp] = await Promise.all([
       apiGet('/api/tags/trending/', { __skipAuth: true }),
-      apiGet('/api/users/recommended/', { __skipAuth: true }),
+      apiGet('/api/users/recommended/', auth.isAuthed() ? {} : { __skipAuth: true }),
     ])
 
     hotTopics.value = Array.isArray(trendingResp?.data) ? trendingResp.data : []
@@ -51,6 +54,30 @@ onMounted(async () => {
     sidebarLoading.value = false
   }
 })
+
+async function toggleFollow(u) {
+  const pid = String(u?.pid || '').trim()
+  if (!pid) return
+  if (!auth.isAuthed()) {
+    router.push({ name: 'login', query: { next: '/latest' } })
+    return
+  }
+  if (followBusyPid.value) return
+
+  followBusyPid.value = pid
+  try {
+    const wasFollowing = Boolean(u?.is_following)
+    const { data } = await api.post(`/api/users/${pid}/follow/`)
+    const following = Boolean(data?.following)
+    u.is_following = following
+    if (typeof data?.followers_count === 'number') u.followers_count = data.followers_count
+    if (wasFollowing && !following) ui.openModal('已取消关注', { title: '提示' })
+  } catch (e) {
+    ui.openModal(e?.response?.data?.detail || '操作失败，请稍后再试。', { title: '提示' })
+  } finally {
+    followBusyPid.value = ''
+  }
+}
 </script>
 
 <template>
@@ -100,7 +127,15 @@ onMounted(async () => {
                 <div class="u-name">{{ u.nickname || u.username || u.pid }}</div>
                 <div class="u-desc">粉丝 {{ u.followers_count ?? 0 }}</div>
               </div>
-              <button class="btn-follow" type="button" disabled>+关注</button>
+              <button
+                class="btn-follow"
+                :class="{ following: !!u.is_following }"
+                type="button"
+                :disabled="followBusyPid === String(u.pid || '')"
+                @click="toggleFollow(u)"
+              >
+                {{ u.is_following ? '已关注' : '+关注' }}
+              </button>
             </div>
           </div>
         </div>
@@ -239,6 +274,11 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.btn-follow.following {
+  background: #f3f4f6;
+  color: #6b7280;
 }
 
 .muted {

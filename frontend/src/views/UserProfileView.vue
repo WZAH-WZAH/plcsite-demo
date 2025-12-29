@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiGet, unwrapList } from '../api'
 import { auth } from '../auth'
+import { ui } from '../ui'
 import PostPreviewCard from '../components/PostPreviewCard.vue'
 
 const route = useRoute()
@@ -11,6 +12,8 @@ const user = ref(null)
 const posts = ref([])
 const loading = ref(true)
 const error = ref('')
+
+const followLoading = ref(false)
 
 const bannerInput = ref(null)
 const bannerUploading = ref(false)
@@ -38,7 +41,7 @@ async function loadData() {
       error.value = '缺少用户 PID。'
       return
     }
-    const { data: u } = await apiGet(`/api/users/${pid}/`, { __skipAuth: true })
+    const { data: u } = await apiGet(`/api/users/${pid}/`, auth.isAuthed() ? {} : { __skipAuth: true })
     user.value = u
 
     const { data } = await apiGet('/api/posts/', { params: { author__pid: pid }, __skipAuth: true })
@@ -50,6 +53,31 @@ async function loadData() {
     else error.value = '加载失败，请稍后再试。'
   } finally {
     loading.value = false
+  }
+}
+
+async function toggleFollow() {
+  if (!user.value) return
+  if (!auth.isAuthed()) {
+    router.push({ name: 'login', query: { next: route.fullPath } })
+    return
+  }
+  if (followLoading.value) return
+
+  followLoading.value = true
+  try {
+    const pid = String(user.value?.pid || '').trim()
+    const wasFollowing = Boolean(user.value?.is_following)
+    const { data } = await api.post(`/api/users/${pid}/follow/`)
+    user.value.is_following = Boolean(data?.following)
+    if (typeof data?.followers_count === 'number') user.value.followers_count = data.followers_count
+    if (wasFollowing && !user.value.is_following) {
+      ui.openModal('已取消关注', { title: '提示' })
+    }
+  } catch (e) {
+    ui.openModal(e?.response?.data?.detail || '操作失败，请稍后再试。', { title: '提示' })
+  } finally {
+    followLoading.value = false
   }
 }
 
@@ -128,7 +156,16 @@ watch(() => route.params.pid, loadData)
 
         <div class="action-area">
           <button v-if="isMe" class="btn-edit" type="button" @click="goToSettings">编辑资料</button>
-          <button v-else class="btn-follow" type="button" disabled>+ 关注</button>
+          <button
+            v-else
+            class="btn-follow"
+            :class="{ following: !!user.is_following }"
+            type="button"
+            :disabled="followLoading"
+            @click="toggleFollow"
+          >
+            {{ user.is_following ? '已关注' : '+ 关注' }}
+          </button>
         </div>
       </div>
     </div>
@@ -308,6 +345,12 @@ watch(() => route.params.pid, loadData)
   font-weight: 500;
   cursor: pointer;
   border: none;
+}
+
+.btn-follow.following {
+  background: #f3f4f6;
+  color: #6b7280;
+  border-color: #e5e7eb;
 }
 
 .btn-edit {

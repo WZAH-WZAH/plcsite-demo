@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.utils import timezone
 from django.core.cache import cache
-from django.db.models import Count
+from django.db.models import BooleanField, Count, Exists, OuterRef, Value
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.pagination import PageNumberPagination
@@ -817,14 +817,28 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
     lookup_value_regex = r'\d{1,8}'
 
     def get_queryset(self):
-        return (
+        qs = (
             User.objects.all()
             .annotate(
                 followers_count=Count('follower_users', distinct=True),
                 following_count=Count('following_users', distinct=True),
             )
-            .order_by('id')
         )
+
+        req_user = getattr(self.request, 'user', None)
+        if req_user is not None and getattr(req_user, 'is_authenticated', False):
+            qs = qs.annotate(
+                is_following=Exists(
+                    UserFollow.objects.filter(
+                        follower_id=req_user.id,
+                        following_id=OuterRef('id'),
+                    )
+                )
+            )
+        else:
+            qs = qs.annotate(is_following=Value(False, output_field=BooleanField()))
+
+        return qs.order_by('id')
 
     def get_serializer_class(self):
         if self.action == 'me':

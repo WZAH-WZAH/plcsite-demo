@@ -1,15 +1,26 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
 import { auth } from '../auth'
 import { api, apiGet, unwrapList } from '../api'
+import { ui } from '../ui'
 
 const searchText = ref('')
 const router = useRouter()
+const route = useRoute()
 const boards = ref([])
 const boardsLoading = ref(false)
 const unread = ref(0)
+
+// Timeline 2nd-level nav (auto-collapse on scroll-down)
+const timelineSubnavHidden = ref(false)
+let lastScrollY = 0
+
+const isTimelineRoute = computed(() => {
+  const p = String(route.path || '')
+  return p === '/latest' || p === '/following'
+})
 
 // Autocomplete state
 const suggestOpen = ref(false)
@@ -78,6 +89,40 @@ onMounted(async () => {
     }
   } finally {
     boardsLoading.value = false
+  }
+})
+
+function onScroll() {
+  if (!isTimelineRoute.value) return
+  const y = Number(window.scrollY || 0)
+  const dy = y - lastScrollY
+
+  // Keep visible near the top.
+  if (y < 60) {
+    timelineSubnavHidden.value = false
+    lastScrollY = y
+    return
+  }
+
+  if (dy > 10) timelineSubnavHidden.value = true
+  else if (dy < -10) timelineSubnavHidden.value = false
+  lastScrollY = y
+}
+
+onMounted(() => {
+  try {
+    lastScrollY = Number(window.scrollY || 0)
+    window.addEventListener('scroll', onScroll, { passive: true })
+  } catch {
+    // ignore
+  }
+})
+
+onUnmounted(() => {
+  try {
+    window.removeEventListener('scroll', onScroll)
+  } catch {
+    // ignore
   }
 })
 
@@ -364,7 +409,7 @@ watch(
             <div class="subnav-left">
               <RouterLink class="subnav-link subnav-main" to="/">首页</RouterLink>
               <RouterLink class="subnav-link subnav-main" to="/hot">热门</RouterLink>
-              <RouterLink class="subnav-link subnav-main" to="/latest">最新动态</RouterLink>
+              <RouterLink class="subnav-link subnav-main" to="/latest">时间线</RouterLink>
 
               <RouterLink v-for="b in canonicalBoards" :key="b.id || b.slug" class="subnav-link" :to="`/b/${b.slug}`">
                 {{ b.title || b.name }}
@@ -393,6 +438,32 @@ watch(
             </div>
           </template>
         </nav>
+      </div>
+    </div>
+
+    <!-- Timeline 2nd-level nav (auto-collapsing) -->
+    <div v-if="isTimelineRoute" class="timeline-subnav" :class="{ hidden: timelineSubnavHidden }">
+      <div class="container">
+        <div class="timeline-tabs" role="tablist" aria-label="时间线导航">
+          <RouterLink
+            to="/latest"
+            class="timeline-tab"
+            :class="{ active: route.path === '/latest' }"
+            role="tab"
+            :aria-selected="String(route.path) === '/latest'"
+          >
+            最新动态
+          </RouterLink>
+          <RouterLink
+            to="/following"
+            class="timeline-tab"
+            :class="{ active: route.path === '/following' }"
+            role="tab"
+            :aria-selected="String(route.path) === '/following'"
+          >
+            关注动态
+          </RouterLink>
+        </div>
       </div>
     </div>
 
@@ -442,6 +513,17 @@ watch(
             </button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Global message modal (reuses existing modal style) -->
+    <div v-if="ui.modalOpen" class="modal-backdrop" @click.self="ui.closeModal()">
+      <div class="modal card" role="dialog" aria-modal="true" :aria-label="ui.modalTitle || '提示'">
+        <div class="row" style="justify-content: space-between">
+          <div style="font-weight: 800">{{ ui.modalTitle || '提示' }}</div>
+          <button type="button" class="modal-close" aria-label="关闭" @click="ui.closeModal()">×</button>
+        </div>
+        <div class="modal-message" style="margin-top: 12px">{{ ui.modalMessage }}</div>
       </div>
     </div>
   </header>
