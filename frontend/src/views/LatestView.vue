@@ -1,14 +1,28 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiGet, unwrapList } from '../api'
 import TimelineItem from '../components/TimelineItem.vue'
+
+const router = useRouter()
 
 const posts = ref([])
 const loading = ref(true)
 
-// Mock 数据：为了解决侧边栏空的问题
-const hotTopics = ref(['#PLC编程大赛#', '#新番导视#', '#独立游戏#', '#周末打卡#'])
-const recUsers = ref(['官方小助手', '技术胖', '影视飓风'])
+const sidebarLoading = ref(true)
+const sidebarError = ref('')
+
+// 后端数据
+const hotTopics = ref([])
+const recUsers = ref([])
+
+const searchQuery = ref('')
+
+function goSearch() {
+  const q = String(searchQuery.value || '').trim()
+  if (!q) return
+  router.push({ path: '/search', query: { q } })
+}
 
 onMounted(async () => {
   try {
@@ -16,6 +30,25 @@ onMounted(async () => {
     posts.value = unwrapList(data)
   } finally {
     loading.value = false
+  }
+
+  // Sidebar 数据单独加载，避免影响主时间线
+  sidebarLoading.value = true
+  sidebarError.value = ''
+  try {
+    const [trendingResp, recommendedResp] = await Promise.all([
+      apiGet('/api/posts/trending/', { __skipAuth: true }),
+      apiGet('/api/users/recommended/', { __skipAuth: true }),
+    ])
+
+    hotTopics.value = Array.isArray(trendingResp?.data) ? trendingResp.data : []
+    recUsers.value = Array.isArray(recommendedResp?.data) ? recommendedResp.data : []
+  } catch (e) {
+    sidebarError.value = e?.response?.data?.detail || '侧边栏加载失败'
+    hotTopics.value = []
+    recUsers.value = []
+  } finally {
+    sidebarLoading.value = false
   }
 })
 </script>
@@ -35,25 +68,40 @@ onMounted(async () => {
 
       <div class="right-sidebar">
         <div class="search-box">
-          <input placeholder="搜索动态..." class="sidebar-input" />
+          <input
+            v-model="searchQuery"
+            placeholder="搜索动态..."
+            class="sidebar-input"
+            @keydown.enter="goSearch"
+          />
         </div>
 
         <div class="sidebar-card">
           <h3>热门话题</h3>
-          <div class="topic-item" v-for="t in hotTopics" :key="t">
-            <span class="topic-name">{{ t }}</span>
+          <div v-if="sidebarLoading" class="muted">加载中...</div>
+          <div v-else-if="sidebarError" class="muted">{{ sidebarError }}</div>
+          <div v-else>
+            <div class="topic-item" v-for="t in hotTopics" :key="t.id">
+              <span class="topic-name">#{{ t.title }}#</span>
+              <span class="topic-count">{{ t.views_count }}</span>
+            </div>
           </div>
         </div>
 
         <div class="sidebar-card">
           <h3>推荐关注</h3>
-          <div class="user-item" v-for="u in recUsers" :key="u">
-            <div class="u-avatar"></div>
-            <div class="u-info">
-              <div class="u-name">{{ u }}</div>
-              <div class="u-desc">优质UP主</div>
+          <div v-if="sidebarLoading" class="muted">加载中...</div>
+          <div v-else-if="sidebarError" class="muted">{{ sidebarError }}</div>
+          <div v-else>
+            <div class="user-item" v-for="u in recUsers" :key="u.pid">
+              <img v-if="u.avatar_url" class="u-avatar" :src="u.avatar_url" alt="avatar" />
+              <div v-else class="u-avatar placeholder"></div>
+              <div class="u-info">
+                <div class="u-name">{{ u.nickname || u.username || u.pid }}</div>
+                <div class="u-desc">粉丝 {{ u.followers_count ?? 0 }}</div>
+              </div>
+              <button class="btn-follow" type="button" disabled>+关注</button>
             </div>
-            <button class="btn-follow" type="button">+关注</button>
           </div>
         </div>
 
@@ -141,9 +189,18 @@ onMounted(async () => {
   cursor: pointer;
   color: #0f1419;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .topic-item:hover {
   color: #1d9bf0;
+}
+
+.topic-count {
+  font-size: 12px;
+  color: #536471;
+  font-weight: 500;
 }
 
 .user-item {
@@ -155,8 +212,12 @@ onMounted(async () => {
 .u-avatar {
   width: 40px;
   height: 40px;
-  background: #ccc;
   border-radius: 50%;
+  object-fit: cover;
+  background: #ccc;
+}
+.u-avatar.placeholder {
+  background: #ccc;
 }
 .u-info {
   flex: 1;
@@ -178,6 +239,12 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.muted {
+  color: #536471;
+  font-size: 13px;
+  padding: 6px 0;
 }
 
 .footer-links {
