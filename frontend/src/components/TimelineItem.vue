@@ -60,8 +60,19 @@ function formatTime(dateStr) {
       </div>
 
       <div class="tl-text">
-        <span class="tl-title-tag">#{{ post.title }}#</span>
+        <span class="tl-title">{{ post.title }}</span>
         {{ generatedExcerpt }}
+
+        <div v-if="post.tags_details && post.tags_details.length" class="tags-row">
+          <span
+            v-for="tag in post.tags_details"
+            :key="tag.id"
+            class="tag-pill"
+            @click.stop="router.push(`/topic/${tag.name}`)"
+          >
+            #{{ tag.name }}
+          </span>
+        </div>
       </div>
 
       <div v-if="post.cover_image_url" class="tl-media" @click.stop="goToDetail">
@@ -160,9 +171,26 @@ function formatTime(dateStr) {
   word-wrap: break-word;
 }
 
-.tl-title-tag {
+.tl-title {
   font-weight: 700;
-  margin-right: 4px;
+  margin-right: 6px;
+}
+
+.tags-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tag-pill {
+  color: #00aeec;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tag-pill:hover {
+  text-decoration: underline;
 }
 
 .tl-media {

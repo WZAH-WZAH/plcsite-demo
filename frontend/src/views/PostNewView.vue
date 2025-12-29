@@ -16,6 +16,8 @@ const boards = ref([])
 const boardId = ref('')
 const title = ref('')
 const body = ref('')
+const tags = ref([])
+const tagInput = ref('')
 const coverFile = ref(null)
 const coverPreview = ref('')
 const coverDragOver = ref(false)
@@ -344,6 +346,37 @@ function onEditorDragLeave() {
   editorDragOver.value = false
 }
 
+function addTag() {
+  const val = String(tagInput.value || '').trim().replace(/^#+/, '').replace(/#+$/, '').trim()
+  if (!val) {
+    tagInput.value = ''
+    return
+  }
+  if (tags.value.includes(val)) {
+    tagInput.value = ''
+    return
+  }
+  if (tags.value.length >= 5) {
+    window.alert('最多添加 5 个标签')
+    tagInput.value = ''
+    return
+  }
+  tags.value.push(val)
+  tagInput.value = ''
+}
+
+function removeTag(i) {
+  tags.value.splice(i, 1)
+}
+
+function onTagKeydown(e) {
+  const key = e?.key
+  if (key === 'Enter' || key === ' ') {
+    e?.preventDefault?.()
+    addTag()
+  }
+}
+
 async function submit() {
   error.value = ''
   loading.value = true
@@ -355,6 +388,9 @@ async function submit() {
     form.append('board', String(Number(boardId.value)))
     form.append('title', title.value.trim())
     form.append('body', body.value)
+    for (const t of tags.value) {
+      form.append('tags', t)
+    }
     if (coverFile.value) {
       form.append('cover_image', coverFile.value)
     }
@@ -407,6 +443,33 @@ onMounted(loadBoards)
       <div>标题</div>
       <input v-model="title" maxlength="200" />
     </label>
+
+    <div class="card" style="padding: 12px">
+      <div style="font-weight: 700">添加话题/标签</div>
+      <div class="muted" style="font-size: 12px">回车/空格生成，最多 5 个</div>
+
+      <div class="row" style="flex-wrap: wrap; gap: 8px; margin-top: 8px">
+        <button
+          v-for="(t, idx) in tags"
+          :key="t"
+          type="button"
+          class="btn"
+          style="border-radius: 999px"
+          @click="removeTag(idx)"
+          :title="`移除 #${t}`"
+        >
+          #{{ t }} ×
+        </button>
+
+        <input
+          v-model="tagInput"
+          placeholder="输入标签按回车生成，如：PLC比赛"
+          @keydown="onTagKeydown"
+          @blur="addTag"
+          style="flex: 1; min-width: 200px"
+        />
+      </div>
+    </div>
 
     <div class="card" style="padding: 12px">
       <div class="row" style="justify-content: space-between">

@@ -54,6 +54,18 @@ function goToProfile(e) {
     </div>
     <div class="bili-card-info">
       <div class="bili-title" :title="post.title">{{ post.title }}</div>
+
+      <div v-if="post.tags_details && post.tags_details.length" class="tags-row">
+        <span
+          v-for="tag in post.tags_details"
+          :key="tag.id"
+          class="tag-pill"
+          @click.prevent.stop="router.push(`/topic/${tag.name}`)"
+        >
+          #{{ tag.name }}
+        </span>
+      </div>
+
       <button class="bili-author" type="button" @click="goToProfile">By {{ displayName }}</button>
     </div>
   </RouterLink>
@@ -148,5 +160,22 @@ function goToProfile(e) {
 
 .bili-author:hover {
   color: #00aeec;
+}
+
+.tags-row {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tag-pill {
+  font-size: 12px;
+  color: #00aeec;
+  cursor: pointer;
+}
+
+.tag-pill:hover {
+  text-decoration: underline;
 }
 </style>

@@ -37,7 +37,7 @@ onMounted(async () => {
   sidebarError.value = ''
   try {
     const [trendingResp, recommendedResp] = await Promise.all([
-      apiGet('/api/posts/trending/', { __skipAuth: true }),
+      apiGet('/api/tags/trending/', { __skipAuth: true }),
       apiGet('/api/users/recommended/', { __skipAuth: true }),
     ])
 
@@ -81,9 +81,9 @@ onMounted(async () => {
           <div v-if="sidebarLoading" class="muted">加载中...</div>
           <div v-else-if="sidebarError" class="muted">{{ sidebarError }}</div>
           <div v-else>
-            <div class="topic-item" v-for="t in hotTopics" :key="t.id">
-              <span class="topic-name">#{{ t.title }}#</span>
-              <span class="topic-count">{{ t.views_count }}</span>
+            <div class="topic-item" v-for="t in hotTopics" :key="t.id" @click="router.push(`/topic/${t.name}`)">
+              <span class="topic-name">#{{ t.name }}#</span>
+              <span class="topic-count">{{ (t.posts_7d ?? t.usage_count ?? 0) }}</span>
             </div>
           </div>
         </div>

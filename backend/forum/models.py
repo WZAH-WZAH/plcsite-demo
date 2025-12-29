@@ -16,6 +16,22 @@ class Board(models.Model):
 		return self.title
 
 
+class Tag(models.Model):
+	name = models.CharField(max_length=100, unique=True, db_index=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	# Redundant hotness counter (updated on post create/update)
+	usage_count = models.IntegerField(default=0)
+
+	class Meta:
+		ordering = ['-usage_count', 'name', 'id']
+		indexes = [
+			models.Index(fields=['-usage_count', 'name'], name='tag_hot_name_idx'),
+		]
+
+	def __str__(self) -> str:
+		return self.name
+
+
 class Post(models.Model):
 	class Status(models.TextChoices):
 		PENDING = 'pending', 'Pending'
@@ -27,6 +43,7 @@ class Post(models.Model):
 	title = models.CharField(max_length=200)
 	cover_image = models.ImageField(upload_to='covers/', null=True, blank=True)
 	body = models.TextField()
+	tags = models.ManyToManyField(Tag, blank=True, related_name='posts')
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
 	is_pinned = models.BooleanField(default=False)
 	is_locked = models.BooleanField(default=False)

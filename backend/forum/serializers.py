@@ -1,6 +1,9 @@
+import json
+
+from django.db.models import F
 from rest_framework import serializers
 
-from .models import Board, BoardHeroSlide, Comment, HomeHeroSlide, Post
+from .models import Board, BoardHeroSlide, Comment, HomeHeroSlide, Post, Tag
 from .image_utils import validate_and_process_uploaded_image
 from .sanitize import sanitize_user_html_in_markdown
 
@@ -31,12 +34,52 @@ class BoardSerializer(serializers.ModelSerializer):
         fields = ('id', 'slug', 'title', 'description', 'sort_order', 'is_active')
 
 
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = ('id', 'name', 'usage_count')
+
+
+class TagNameField(serializers.SlugRelatedField):
+    """Accept tag name strings and auto-create Tag objects.
+
+    Supports multipart submissions where tag values come in as repeated form fields.
+    Also tolerates JSON-stringified list submissions for compatibility.
+    """
+
+    def to_internal_value(self, data):
+        # Compatibility: if client sends a JSON list as a single string.
+        if isinstance(data, str):
+            s = data.strip()
+            if s.startswith('[') and s.endswith(']'):
+                try:
+                    arr = json.loads(s)
+                    if isinstance(arr, list):
+                        # Let ListField handle lists; but for safety accept first item.
+                        if len(arr) == 1:
+                            data = arr[0]
+                except Exception:
+                    pass
+
+        value = str(data or '').strip()
+        value = value.strip('#').strip()
+        if not value:
+            raise serializers.ValidationError('Invalid tag name.')
+        if len(value) > 100:
+            raise serializers.ValidationError('Tag name too long.')
+
+        tag, _ = Tag.objects.get_or_create(name=value)
+        return tag
+
+
 class PostSerializer(serializers.ModelSerializer):
     author_username = serializers.CharField(source='author.username', read_only=True)
     author_nickname = serializers.CharField(source='author.nickname', read_only=True)
     author_pid = serializers.CharField(source='author.pid', read_only=True)
     board_slug = serializers.CharField(source='board.slug', read_only=True)
     cover_image_url = serializers.SerializerMethodField(read_only=True)
+    tags = TagNameField(many=True, slug_field='name', queryset=Tag.objects.all(), required=False)
+    tags_details = TagSerializer(source='tags', many=True, read_only=True)
     # Social fields (interaction layer)
     # Notes:
     # - Counts/flags are provided by queryset annotations in PostViewSet for performance.
@@ -69,6 +112,8 @@ class PostSerializer(serializers.ModelSerializer):
 			'cover_image_url',
             'remove_cover_image',
             'body',
+            'tags',
+            'tags_details',
             'views_count',
 			'hot_score_100',
 			'likes_count',
@@ -114,6 +159,23 @@ class PostSerializer(serializers.ModelSerializer):
             'resource',
         )
 
+    def validate_tags(self, value):
+        # Keep UX simple/stable: cap tag count.
+        if value is None:
+            return value
+        if len(value) > 5:
+            raise serializers.ValidationError('最多添加 5 个标签。')
+        # De-dup by name (case-sensitive for now, consistent with unique constraint).
+        seen = set()
+        uniq = []
+        for t in value:
+            name = getattr(t, 'name', None)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            uniq.append(t)
+        return uniq
+
     def get_cover_image_url(self, obj):
         try:
             f = getattr(obj, 'cover_image', None)
@@ -137,18 +199,41 @@ class PostSerializer(serializers.ModelSerializer):
         remove_cover = bool(validated_data.pop('remove_cover_image', False))
         validated_data.pop('resource_links', None)
 
+        tags = validated_data.pop('tags', [])
+
         # For create, allow clients to explicitly indicate no cover.
         if remove_cover:
             validated_data.pop('cover_image', None)
 
-        return super().create(validated_data)
+        post = super().create(validated_data)
+        if tags:
+            post.tags.set(tags)
+            Tag.objects.filter(id__in=[t.id for t in tags]).update(usage_count=F('usage_count') + 1)
+        return post
 
     def update(self, instance, validated_data):
         # Ignore serializer-only inputs (resource_links handled by view).
         validated_data.pop('resource_links', None)
         if validated_data.pop('remove_cover_image', False):
             instance.cover_image = None
-        return super().update(instance, validated_data)
+
+        tags = validated_data.pop('tags', None)
+        updated = super().update(instance, validated_data)
+
+        if tags is not None:
+            old_ids = set(updated.tags.values_list('id', flat=True))
+            new_ids = set([t.id for t in tags])
+            add_ids = list(new_ids - old_ids)
+            remove_ids = list(old_ids - new_ids)
+
+            if remove_ids:
+                Tag.objects.filter(id__in=remove_ids, usage_count__gt=0).update(usage_count=F('usage_count') - 1)
+            if add_ids:
+                Tag.objects.filter(id__in=add_ids).update(usage_count=F('usage_count') + 1)
+
+            updated.tags.set(tags)
+
+        return updated
 
 
 class PostModerationSerializer(serializers.ModelSerializer):

@@ -9,8 +9,9 @@ from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import BooleanField, Count, DateTimeField, Exists, ExpressionWrapper, F, IntegerField, Max, OuterRef, Q, Value
+from django.db.models import BooleanField, Count, DateTimeField, Exists, ExpressionWrapper, F, IntegerField, Max, OuterRef, Q, Sum, Value
 from django.db.models.functions import Cast
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from rest_framework import permissions, status, viewsets
@@ -27,7 +28,7 @@ from accounts.audit import write_audit_log
 from accounts.permissions import IsModerator
 from accounts.services import staff_allowed_board_ids, staff_can_moderate_board, staff_can_delete_board
 
-from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike
+from .models import Board, BoardFollow, BoardHeroSlide, Comment, HomeHeroSlide, Post, PostFavorite, PostLike, Tag
 from .permissions import IsAuthorOrStaffOrReadOnly
 from .serializers import (
     BoardSerializer,
@@ -39,6 +40,7 @@ from .serializers import (
     PostRevisionDiffSerializer,
     PostRevisionSerializer,
     PostSerializer,
+    TagSerializer,
 )
 from .image_utils import validate_and_process_uploaded_image
 
@@ -121,13 +123,57 @@ class HomeHeroSlideViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.AllowAny]
 
 
+class TagViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Tag.objects.all().order_by('-usage_count', 'name', 'id')
+    serializer_class = TagSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @action(detail=False, methods=['get'], url_path='trending', permission_classes=[permissions.AllowAny])
+    def trending(self, request):
+        limit = request.query_params.get('limit')
+        try:
+            limit_i = int(limit) if limit is not None else 10
+        except ValueError:
+            limit_i = 10
+        limit_i = max(1, min(limit_i, 50))
+
+        since = timezone.now() - timedelta(days=7)
+        post_filter = Q(
+            posts__created_at__gte=since,
+            posts__status=Post.Status.PUBLISHED,
+            posts__is_deleted=False,
+        )
+
+        qs = (
+            Tag.objects.all()
+            .annotate(posts_7d=Count('posts', filter=post_filter, distinct=True))
+            .annotate(views_7d=Coalesce(Sum('posts__views_count', filter=post_filter), Value(0)))
+            .annotate(likes_7d=Count('posts__likes', filter=post_filter, distinct=True))
+            .annotate(hotness=F('views_7d') + F('likes_7d') * 5)
+            .filter(posts_7d__gt=0)
+            .order_by('-hotness', '-posts_7d', 'name', 'id')
+        )[:limit_i]
+
+        data = [
+            {
+                'id': t.id,
+                'name': t.name,
+                'usage_count': int(getattr(t, 'usage_count', 0) or 0),
+                'posts_7d': int(getattr(t, 'posts_7d', 0) or 0),
+                'hotness': int(getattr(t, 'hotness', 0) or 0),
+            }
+            for t in qs
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+
 class PostViewSet(viewsets.ModelViewSet):
-    queryset = Post.objects.select_related('board', 'author', 'reviewed_by').prefetch_related('resource__links')
+    queryset = Post.objects.select_related('board', 'author', 'reviewed_by').prefetch_related('resource__links', 'tags')
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsAuthorOrStaffOrReadOnly]
     filter_backends = [DjangoFilterBackend, SearchFilter]
-    filterset_fields = ['board', 'author__pid']
-    search_fields = ['title', 'body', 'author__nickname', 'author__username']
+    filterset_fields = ['board', 'author__pid', 'tags__name']
+    search_fields = ['title', 'body', 'author__nickname', 'author__username', 'tags__name']
 
     @action(detail=False, methods=['get'])
     def trending(self, request):

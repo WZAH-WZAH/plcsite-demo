@@ -19,6 +19,7 @@ import SearchPostsView from '../views/SearchPostsView.vue'
 import PostEditView from '../views/PostEditView.vue'
 import NotificationsView from '../views/NotificationsView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
+import TopicDetailView from '../views/TopicDetailView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -37,6 +38,8 @@ const router = createRouter({
     { path: '/b/:slug', name: 'board-posts', component: BoardPostsView },
 
     { path: '/search', name: 'search', component: SearchPostsView },
+
+    { path: '/topic/:name', name: 'topic-detail', component: TopicDetailView },
 
     { path: '/posts/new', name: 'post-new', component: PostNewView, meta: { requiresAuth: true } },
     { path: '/posts/:id/edit', name: 'post-edit', component: PostEditView, meta: { requiresAuth: true } },
