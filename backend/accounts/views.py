@@ -111,10 +111,12 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        user_id = getattr(user, 'id', None)
         # Ensure pid exists (8-digit numeric string).
         try:
             if not getattr(user, 'pid', None):
-                user.pid = str(int(user.id)).zfill(8)
+                if user_id is not None:
+                    user.pid = str(int(user_id)).zfill(8)
                 user.save(update_fields=['pid'])
         except Exception:
             pass
@@ -126,7 +128,7 @@ class RegisterView(APIView):
                     actor=user,
                     action='user.email.verify.register',
                     target_type='user',
-                    target_id=str(user.id),
+                    target_id=str(user_id or ''),
                     request=request,
                     metadata={'email': getattr(user, 'email', '')},
                 )
@@ -134,7 +136,12 @@ class RegisterView(APIView):
             pass
 
         return Response(
-            {'id': user.id, 'pid': getattr(user, 'pid', ''), 'nickname': getattr(user, 'nickname', ''), 'username': user.username},
+            {
+                'id': user_id,
+                'pid': getattr(user, 'pid', ''),
+                'nickname': getattr(user, 'nickname', ''),
+                'username': getattr(user, 'username', ''),
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -286,7 +293,7 @@ class PasswordResetView(APIView):
                 actor=user,
                 action='user.password.reset',
                 target_type='user',
-                target_id=str(user.id),
+                target_id=str(getattr(user, 'id', '') or ''),
                 request=request,
             )
         except Exception:
@@ -765,6 +772,9 @@ class UserFollowToggleView(APIView):
 
     def post(self, request, user_id: int):
         follower = request.user
+        follower_id = getattr(follower, 'id', None)
+        if follower_id is None:
+            return Response({'detail': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
         if getattr(follower, 'is_currently_banned', False):
             return Response({'detail': 'User is banned.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -773,7 +783,7 @@ class UserFollowToggleView(APIView):
         except Exception:
             return Response({'detail': 'Invalid user id.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if follower.id == target_id:
+        if follower_id == target_id:
             return Response({'detail': 'Cannot follow yourself.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -781,13 +791,17 @@ class UserFollowToggleView(APIView):
         except User.DoesNotExist:
             return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        obj = UserFollow.objects.filter(follower_id=follower.id, following_id=target.id).first()
+        target_db_id = getattr(target, 'id', None)
+        if target_db_id is None:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        obj = UserFollow.objects.filter(follower_id=follower_id, following_id=target_db_id).first()
         if obj is not None:
             obj.delete()
             following = False
             audit_action = 'user.unfollow'
         else:
-            UserFollow.objects.create(follower_id=follower.id, following_id=target.id)
+            UserFollow.objects.create(follower_id=follower_id, following_id=target_db_id)
             following = True
             audit_action = 'user.follow'
 
@@ -795,11 +809,11 @@ class UserFollowToggleView(APIView):
             actor=follower,
             action=audit_action,
             target_type='user',
-            target_id=str(target.id),
+            target_id=str(target_db_id),
             request=request,
         )
 
-        followers_count = UserFollow.objects.filter(following_id=target.id).count()
+        followers_count = UserFollow.objects.filter(following_id=target_db_id).count()
         return Response({'following': following, 'followers_count': followers_count}, status=status.HTTP_200_OK)
 
 
@@ -879,20 +893,27 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
         """Toggle follow/unfollow for a user by PID."""
 
         follower = request.user
+        follower_id = getattr(follower, 'id', None)
+        if follower_id is None:
+            return Response({'detail': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
         if getattr(follower, 'is_currently_banned', False):
             return Response({'detail': 'User is banned.'}, status=status.HTTP_403_FORBIDDEN)
 
         target = self.get_object()
-        if follower.id == target.id:
+        target_db_id = getattr(target, 'id', None)
+        if target_db_id is None:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if follower_id == target_db_id:
             return Response({'detail': 'Cannot follow yourself.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        obj = UserFollow.objects.filter(follower_id=follower.id, following_id=target.id).first()
+        obj = UserFollow.objects.filter(follower_id=follower_id, following_id=target_db_id).first()
         if obj is not None:
             obj.delete()
             following = False
             audit_action = 'user.unfollow'
         else:
-            UserFollow.objects.create(follower_id=follower.id, following_id=target.id)
+            UserFollow.objects.create(follower_id=follower_id, following_id=target_db_id)
             following = True
             audit_action = 'user.follow'
 
@@ -919,8 +940,10 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
 
         base_qs = self.get_queryset().filter(is_active=True)
         me = request.user if (request.user and request.user.is_authenticated) else None
+        me_id = getattr(me, 'id', None) if me is not None else None
         if me is not None:
-            base_qs = base_qs.exclude(id=me.id)
+            if me_id is not None:
+                base_qs = base_qs.exclude(id=me_id)
 
         # Default: top by followers_count.
         def fallback(exclude_ids=None):
@@ -931,8 +954,12 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
 
         # Tag-based recommendation for users with a meaningful following graph.
         if me is not None:
-            followed_ids_qs = UserFollow.objects.filter(follower_id=me.id).values_list('following_id', flat=True)
-            followed_count = UserFollow.objects.filter(follower_id=me.id).count()
+            if me_id is None:
+                ser = self.get_serializer(fallback(), many=True, context={'request': request})
+                return Response(ser.data, status=status.HTTP_200_OK)
+
+            followed_ids_qs = UserFollow.objects.filter(follower_id=me_id).values_list('following_id', flat=True)
+            followed_count = UserFollow.objects.filter(follower_id=me_id).count()
 
             if followed_count >= 5:
                 try:
@@ -968,7 +995,8 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
 
                         items = list(cand[:5])
                         if len(items) < 5:
-                            extra = list(fallback(exclude_ids=set([u.id for u in items]) | set(followed_ids_qs)))
+                            item_ids = {uid for uid in (getattr(u, 'id', None) for u in items) if uid is not None}
+                            extra = list(fallback(exclude_ids=item_ids | set(followed_ids_qs)))
                             items = (items + extra)[:5]
                         ser = self.get_serializer(items, many=True, context={'request': request})
                         return Response(ser.data, status=status.HTTP_200_OK)
