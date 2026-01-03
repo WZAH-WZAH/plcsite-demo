@@ -85,6 +85,7 @@ INSTALLED_APPS = [
     'resources',
     'payments',
     'sync',
+    'rbac',
 ]
 
 MIDDLEWARE = [

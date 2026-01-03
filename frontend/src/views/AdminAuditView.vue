@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import { fmtDateTime } from '../datetime'
 
 const logs = ref([])
 const error = ref('')
@@ -83,19 +84,19 @@ onMounted(load)
           <div>
             <div style="font-weight: 700">{{ l.action }}</div>
             <div class="muted">
-              {{ new Date(l.created_at).toLocaleString() }} ·
-              actor={{ l.actor_nickname || l.actor_username || l.actor || 'null' }}
+              {{ fmtDateTime(l.created_at) }} ·
+              操作人={{ l.actor_nickname || l.actor_username || l.actor || '无' }}
               <template v-if="l.actor_nickname && l.actor_username"> · {{ l.actor_username }}</template>
               <template v-if="l.actor_pid"> · PID {{ l.actor_pid }}</template>
               <template v-if="l.actor_id"> · #{{ l.actor_id }}</template>
-              · ip={{ l.ip || '-' }}
+              · IP={{ l.ip || '-' }}
             </div>
 
             <div v-if="l.action === 'user.username.update' && l.metadata && (l.metadata.username_before || l.metadata.username_after)" class="muted">
               用户名：{{ l.metadata.username_before || '-' }} → {{ l.metadata.username_after || '-' }}
             </div>
 
-            <div class="muted" v-if="l.target_type">target={{ l.target_type }}#{{ l.target_id }}</div>
+            <div class="muted" v-if="l.target_type">目标={{ l.target_type }}#{{ l.target_id }}</div>
           </div>
           <pre class="muted" style="max-width: 420px; overflow: auto; margin: 0; white-space: pre-wrap">
 {{ fmtMeta(l.metadata) }}

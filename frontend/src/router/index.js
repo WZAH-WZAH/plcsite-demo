@@ -5,6 +5,7 @@ import AdminHomeView from '../views/AdminHomeView.vue'
 import AdminAuditView from '../views/AdminAuditView.vue'
 import AdminModerationView from '../views/AdminModerationView.vue'
 import AdminUsersView from '../views/AdminUsersView.vue'
+import AdminPermissionsView from '../views/AdminPermissionsView.vue'
 import BoardPostsView from '../views/BoardPostsView.vue'
 import BoardsView from '../views/BoardsView.vue'
 import HomeView from '../views/HomeView.vue'
@@ -60,8 +61,17 @@ const router = createRouter({
     { path: '/admin/moderation', name: 'admin-moderation', component: AdminModerationView, meta: { requiresAuth: true } },
     { path: '/admin/users', name: 'admin-users', component: AdminUsersView, meta: { requiresAuth: true } },
     { path: '/admin/audit', name: 'admin-audit', component: AdminAuditView, meta: { requiresAuth: true } },
+    { path: '/admin/permissions', name: 'admin-permissions', component: AdminPermissionsView, meta: { requiresAuth: true } },
   ],
-  scrollBehavior() {
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition
+    if (to.hash) {
+      return {
+        el: to.hash,
+        top: 90,
+        behavior: 'smooth',
+      }
+    }
     return { top: 0 }
   },
 })

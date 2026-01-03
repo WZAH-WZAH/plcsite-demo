@@ -4,6 +4,10 @@ function translateMessage(msg) {
   if (s === 'This field may not be blank.') return '不能为空。'
   if (s === 'This field is required.') return '为必填项。'
   if (s === 'Invalid pk "null" - object does not exist.') return '无效的选择。'
+  if (s === 'Not allowed.') return '无权限。'
+  if (s === 'You do not have permission to perform this action.') return '无权限执行此操作。'
+  if (s === 'Authentication credentials were not provided.') return '请先登录。'
+  if (s === 'Invalid token.' || s === 'Token is invalid or expired') return '登录已过期，请重新登录。'
 
   // Common DRF patterns
   let m = s.match(/Ensure this field has no more than (\d+) characters\./)

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import { auth } from '../auth'
+import { fmtDateTime } from '../datetime'
 
 const users = ref([])
 const error = ref('')
@@ -220,12 +221,12 @@ onMounted(load)
             </div>
             <div class="muted" v-if="u.is_banned">
               已封禁：{{ u.ban_reason || '未填原因' }}
-              <span v-if="u.banned_until"> · 至 {{ new Date(u.banned_until).toLocaleString() }}</span>
+              <span v-if="u.banned_until"> · 至 {{ fmtDateTime(u.banned_until) }}</span>
               <span v-else> · 永久</span>
             </div>
             <div class="muted" v-if="u.is_muted">
               已禁言：{{ u.mute_reason || '未填原因' }}
-              <span v-if="u.muted_until"> · 至 {{ new Date(u.muted_until).toLocaleString() }}</span>
+              <span v-if="u.muted_until"> · 至 {{ fmtDateTime(u.muted_until) }}</span>
               <span v-else> · 永久</span>
             </div>
           </div>

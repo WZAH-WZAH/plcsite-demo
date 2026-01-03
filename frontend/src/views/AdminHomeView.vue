@@ -18,6 +18,7 @@ import { auth } from '../auth'
         <RouterLink class="btn" to="/admin/moderation">审核队列</RouterLink>
         <RouterLink class="btn" to="/admin/users">用户封禁</RouterLink>
         <RouterLink class="btn" to="/admin/audit">审核日志</RouterLink>
+        <RouterLink class="btn" to="/admin/permissions">权限管理</RouterLink>
       </div>
     </div>
   </div>

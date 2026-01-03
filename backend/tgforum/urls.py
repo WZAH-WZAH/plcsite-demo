@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/', include('resources.urls')),
     path('api/', include('payments.urls')),
     path('api/', include('sync.urls')),
+    path('api/', include('rbac.urls')),
 ]
 
 if settings.DEBUG:

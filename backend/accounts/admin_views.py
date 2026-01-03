@@ -3,17 +3,17 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.db.models import Q
-from rest_framework import permissions, status
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .audit import write_audit_log
 from .models import AuditLog
-from .permissions import IsAdmin
 from .serializers import AdminUserSerializer
 from .models import StaffBoardPermission
 from forum.models import Board
 from .services import staff_allowed_board_ids
+from rbac.permissions import casbin_permission
 
 User = get_user_model()
 
@@ -38,7 +38,7 @@ def _assert_can_manage(actor, target) -> None:
 
 
 class AdminUserListView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [casbin_permission('admin.users', 'read')]
 
     def get(self, request):
         qs = User.objects.order_by('-date_joined')
@@ -50,7 +50,7 @@ class AdminUserListView(APIView):
 
 
 class AdminBanUserView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [casbin_permission('admin.users', 'ban')]
 
     def post(self, request, user_id: int):
         try:
@@ -88,7 +88,7 @@ class AdminBanUserView(APIView):
 
 
 class AdminUnbanUserView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [casbin_permission('admin.users', 'unban')]
 
     def post(self, request, user_id: int):
         try:
@@ -115,7 +115,7 @@ class AdminUnbanUserView(APIView):
 
 
 class AdminMuteUserView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [casbin_permission('admin.users', 'mute')]
 
     def post(self, request, user_id: int):
         try:
@@ -153,7 +153,7 @@ class AdminMuteUserView(APIView):
 
 
 class AdminUnmuteUserView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [casbin_permission('admin.users', 'unmute')]
 
     def post(self, request, user_id: int):
         try:
@@ -180,7 +180,7 @@ class AdminUnmuteUserView(APIView):
 
 
 class AdminAuditLogListView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [casbin_permission('admin.audit', 'read')]
 
     def get(self, request):
         include_archived = str(request.query_params.get('include_archived') or '').strip().lower() in ('1', 'true', 'yes')
@@ -319,7 +319,7 @@ class AdminAuditLogListView(APIView):
 
 
 class AdminGrantStaffView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [casbin_permission('admin.users', 'grant_staff')]
 
     def post(self, request, user_id: int):
         try:
@@ -348,7 +348,7 @@ class AdminGrantStaffView(APIView):
 
 
 class AdminRevokeStaffView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [casbin_permission('admin.users', 'revoke_staff')]
 
     def post(self, request, user_id: int):
         try:
@@ -378,7 +378,7 @@ class AdminRevokeStaffView(APIView):
 class AdminUserBoardPermsView(APIView):
     """Superuser configures staff permissions per board."""
 
-    permission_classes = [IsAdmin]
+    permission_classes = [casbin_permission('admin.users', 'board_perms')]
 
     def get(self, request, user_id: int):
         try:

@@ -6,10 +6,8 @@ from .admin_views import (
     AdminAuditLogListView,
     AdminBanUserView,
     AdminMuteUserView,
-    AdminMuteUserView,
     AdminGrantStaffView,
     AdminRevokeStaffView,
-    AdminUnmuteUserView,
     AdminUnbanUserView,
     AdminUnmuteUserView,
     AdminUserBoardPermsView,
@@ -24,6 +22,8 @@ from .views import (
     MeAvatarView,
     MeBioView,
     MeCheckinView,
+    MeFavoritesView,
+    MeFollowingUsersView,
     MeNicknameView,
     MePasswordChangeView,
     MePostsView,
@@ -58,6 +58,8 @@ urlpatterns = [
     path('me/email/verify-code/send/', MeEmailVerifyCodeSendView.as_view(), name='me-email-verify-code-send'),
     path('me/email/verify-code/verify/', MeEmailVerifyCodeVerifyView.as_view(), name='me-email-verify-code-verify'),
     path('me/posts/', MePostsView.as_view(), name='me-posts'),
+    path('me/favorites/', MeFavoritesView.as_view(), name='me-favorites'),
+    path('me/following/', MeFollowingUsersView.as_view(), name='me-following'),
 
     # Admin APIs (基础管理：用户封禁/审计)
     path('admin/users/', AdminUserListView.as_view(), name='admin-users'),

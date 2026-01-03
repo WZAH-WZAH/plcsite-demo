@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, unwrapList } from '../api'
 import { auth } from '../auth'
+import { fmtDateTime } from '../datetime'
 
 const pendingPosts = ref([])
 const boards = ref([])
@@ -191,11 +192,11 @@ onMounted(async () => {
           <div>
             <div style="font-weight: 700">{{ p.title }}</div>
             <div class="muted">
-              by {{ p.author_nickname || p.author_username }}
+              作者：{{ p.author_nickname || p.author_username }}
               <span v-if="p.author_nickname && p.author_username"> · {{ p.author_username }}</span>
               <span v-if="p.author_pid"> · PID {{ p.author_pid }}</span>
-              · board={{ p.board_slug }} · 创建：{{ new Date(p.created_at).toLocaleString() }}
-              <span v-if="p.updated_at"> · 最后编辑：{{ new Date(p.updated_at).toLocaleString() }}</span>
+              · 板块={{ p.board_slug }} · 创建：{{ fmtDateTime(p.created_at) }}
+              <span v-if="p.updated_at"> · 最后编辑：{{ fmtDateTime(p.updated_at) }}</span>
             </div>
 
             <div class="muted" style="margin-top: 6px">
@@ -274,7 +275,7 @@ onMounted(async () => {
               :disabled="revBusy[`diff:${p.id}`]"
               @click="loadDiff(p.id, rev.id)"
             >
-              {{ new Date(rev.created_at).toLocaleString() }}
+              {{ fmtDateTime(rev.created_at) }}
               <span v-if="rev.editor_username"> · {{ rev.editor_username }}</span>
             </button>
           </div>

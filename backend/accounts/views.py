@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
@@ -27,6 +29,7 @@ from .services import (
     try_award_checkin_points,
 )
 
+from notifications.models import Notification
 
 User = get_user_model()
 
@@ -56,6 +59,36 @@ def _reject_angle_brackets(s: str) -> str:
     if '<' in s or '>' in s:
         raise ValueError('不允许包含 < 或 >。')
     return s
+
+
+def _notify_user_follow(*, recipient, actor) -> None:
+    """Create USER_FOLLOW notification with simple de-duplication.
+
+    Rule: within last 24h, same actor->recipient follow creates at most 1 notification.
+    Best-effort: must never break follow flow.
+    """
+
+    try:
+        rid = getattr(recipient, 'id', None)
+        aid = getattr(actor, 'id', None)
+        if not rid or not aid or rid == aid:
+            return
+
+        since = timezone.now() - timedelta(days=1)
+        exists = Notification.objects.filter(
+            recipient_id=rid,
+            actor_id=aid,
+            type=Notification.Type.USER_FOLLOW,
+            created_at__gte=since,
+        ).exists()
+        if not exists:
+            Notification.objects.create(
+                recipient=recipient,
+                actor=actor,
+                type=Notification.Type.USER_FOLLOW,
+            )
+    except Exception:
+        return
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -110,7 +143,7 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        user = cast(Any, serializer.save())
         user_id = getattr(user, 'id', None)
         # Ensure pid exists (8-digit numeric string).
         try:
@@ -513,6 +546,8 @@ class MePasswordChangeView(APIView):
         )
 
         return Response({'ok': True}, status=status.HTTP_200_OK)
+
+
 class MeEmailVerifyCodeSendView(APIView):
     """Reserve API: send a verification code to an email.
 
@@ -631,6 +666,66 @@ class MePostsView(APIView):
         paginator.page_size = 20
         page = paginator.paginate_queryset(qs, request)
         ser = PostSerializer(page, many=True, context={'request': request})
+        return paginator.get_paginated_response(ser.data)
+
+
+class MeFavoritesView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from forum.models import PostFavorite, Post
+        from forum.serializers import PostSerializer
+
+        # Use subquery or values_list to get posts, maintaining order by favorite time
+        fav_qs = PostFavorite.objects.filter(user=request.user).order_by('-created_at')
+        
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page_favs = paginator.paginate_queryset(fav_qs, request) or []
+        
+        post_ids = [f.post_id for f in page_favs]
+        
+        # Fetch posts with standard prefetch
+        posts_map = {}
+        for p in (
+            Post.objects.filter(id__in=post_ids)
+            .select_related('board', 'author')
+            .prefetch_related('tags')
+        ):
+            pid = getattr(p, 'id', None)
+            if pid is not None:
+                posts_map[pid] = p
+        
+        # Reorder match fav order
+        posts = []
+        for pid in post_ids:
+            if pid in posts_map:
+                posts.append(posts_map[pid])
+
+        ser = PostSerializer(posts, many=True, context={'request': request})
+        return paginator.get_paginated_response(ser.data)
+
+
+class MeFollowingUsersView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        # Users that I follow
+        qs = (
+            User.objects.filter(follower_users__follower=request.user)
+            .annotate(
+                followers_count=Count('follower_users', distinct=True),
+                following_count=Count('following_users', distinct=True),
+                is_following=Value(True, output_field=BooleanField()),
+            )
+            .order_by('-follower_users__created_at')
+        )
+        
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(qs, request)
+        
+        ser = PublicUserSerializer(page, many=True, context={'request': request})
         return paginator.get_paginated_response(ser.data)
 
 
@@ -763,9 +858,6 @@ class UserFollowToggleView(APIView):
     Used by:
     - post detail: follow the author
     - following feed: show posts by followed authors
-
-    Notes:
-    - This intentionally does NOT create notifications.
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -917,6 +1009,8 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
             following = True
             audit_action = 'user.follow'
 
+            _notify_user_follow(recipient=target, actor=follower)
+
         write_audit_log(
             actor=follower,
             action=audit_action,
@@ -925,7 +1019,7 @@ class UserViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.Gen
             request=request,
         )
 
-        followers_count = UserFollow.objects.filter(following_id=target.id).count()
+        followers_count = UserFollow.objects.filter(following_id=target_db_id).count()
         return Response({'following': following, 'followers_count': followers_count}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='recommended')

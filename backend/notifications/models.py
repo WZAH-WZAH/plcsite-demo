@@ -6,6 +6,7 @@ class Notification(models.Model):
     class Type(models.TextChoices):
         COMMENT_ON_POST = 'comment_on_post', 'Comment on post'
         REPLY_TO_COMMENT = 'reply_to_comment', 'Reply to comment'
+        USER_FOLLOW = 'user_follow', 'User follow'
 
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -21,8 +22,8 @@ class Notification(models.Model):
     )
     type = models.CharField(max_length=40, choices=Type.choices)
 
-    post = models.ForeignKey('forum.Post', on_delete=models.CASCADE, related_name='notifications')
-    comment = models.ForeignKey('forum.Comment', on_delete=models.CASCADE, related_name='notifications')
+    post = models.ForeignKey('forum.Post', null=True, blank=True, on_delete=models.CASCADE, related_name='notifications')
+    comment = models.ForeignKey('forum.Comment', null=True, blank=True, on_delete=models.CASCADE, related_name='notifications')
 
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
